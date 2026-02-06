@@ -89,10 +89,9 @@ if uploaded_file is not None:
         # --- ZOOM-LOGIK (5x Vergrößerung mit Pfeilen) ---
         st.subheader("🔍 Detail-Ansicht Kanten (5x Zoom)")
         z_cols = st.columns(2)
-        
         y_mid = img_rot.shape[0] // 2 
 
-        def get_zoom_with_arrows(img, x_center, y_center, size, scale, marks):
+        def draw_zoom(img, x_center, y_center, size, scale, marks):
             x1 = max(0, x_center - size // 2)
             y1 = max(0, y_center - size // 2)
             x2 = min(img.shape[1], x_center + size // 2)
@@ -104,24 +103,24 @@ if uploaded_file is not None:
             for x_px, color in marks:
                 rel_x = int((x_px - x1) * scale)
                 if 0 <= rel_x < resized.shape[1]:
-                    # Pfeile einzeichnen (Gelb/Grün)
-                    cv2.arrowedLine(resized, (rel_x, 10), (rel_x, 60), color, 4, tipLength=0.3)
+                    # Zeichne Pfeil (Start, Ende, Farbe, Dicke)
+                    cv2.arrowedLine(resized, (rel_x, 15), (rel_x, 65), color, 4, tipLength=0.3)
             return resized
 
-        zoom_factor = 5
-        zoom_size = 100 
+        zoom_f = 5
+        zoom_s = 80 
 
-        # Linker Zoom
+        # Linker Zoom (Markierung für Außenkante gelb und Innenkante grün)
         marks_l = [(x_links_a_px, (255, 255, 0)), (x_links_w_px, (0, 255, 0))]
         x_mid_l = (x_links_a_px + x_links_w_px) // 2
-        zoom_img_l = get_zoom_with_arrows(img_rot, x_mid_l, y_mid, zoom_size, zoom_factor, marks_l)
-        z_cols[0].image(zoom_img_l, caption="Links (Gelb=Außen, Grün=Innen)", use_container_width=True)
+        zoom_l = draw_zoom(img_rot, x_mid_l, y_mid, zoom_s, zoom_f, marks_l)
+        z_cols[0].image(zoom_l, caption="Links (Gelb=Außen, Grün=Innen)", use_container_width=True)
 
-        # Rechter Zoom
+        # Rechter Zoom (Markierung für Innenkante grün und Außenkante gelb)
         marks_r = [(x_rechts_w_px, (0, 255, 0)), (x_rechts_a_px, (255, 255, 0))]
         x_mid_r = (x_rechts_a_px + x_rechts_w_px) // 2
-        zoom_img_r = get_zoom_with_arrows(img_rot, x_mid_r, y_mid, zoom_size, zoom_factor, marks_r)
-        z_cols[1].image(zoom_img_r, caption="Rechts (Grün=Innen, Gelb=Außen)", use_container_width=True)
+        zoom_r = draw_zoom(img_rot, x_mid_r, y_mid, zoom_s, zoom_f, marks_r)
+        z_cols[1].image(zoom_r, caption="Rechts (Grün=Innen, Gelb=Außen)", use_container_width=True)
 
         # --- HAUPTGRAFIKEN ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
@@ -144,4 +143,4 @@ if uploaded_file is not None:
         
         st.pyplot(fig)
     else:
-        st.error("Weißer Bereich nicht erkannt. Prüfe Licht und Ausrichtung.")
+        st.error("Weißer Bereich nicht erkannt. Bitte Ausrichtung prüfen.")
