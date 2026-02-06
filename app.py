@@ -8,26 +8,27 @@ from scipy.signal import convolve2d
 st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
 
 st.title("🛠 Profil-Mess-App Pro")
-st.write("Zoom-Ansicht erfolgt jetzt nach der Kantenmarkierung.")
+st.write("Die Kamera ist aktiv. Bitte positioniere das Bauteil und mache ein Foto.")
 
-# --- SEITENLEISTE (EINSTELLUNGEN) ---
+# --- SEITENLEISTE (EINSTELLUNGEN AUS SCREENSHOT) ---
 st.sidebar.header("Einstellungen")
 
 kanten_sens = st.sidebar.slider(
     "Kanten-Sensibilität", 
     min_value=0.01, 
     max_value=0.30, 
-    value=0.05, 
+    value=0.14,  # Wert aus Screenshot übernommen
     step=0.01,
     help="Niedriger Wert = erkennt feinste Kanten. Hoher Wert = ignoriert Schatten."
 )
 
-ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=90.0)
-such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 5, 30, 10)
-mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
+ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=90.00) # Wert aus Screenshot
+such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 3, 30, 5) # Wert aus Screenshot
+mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75) # Wert aus Screenshot
 
-# --- BILD-UPLOAD ---
-uploaded_file = st.sidebar.file_uploader("Bild auswählen oder Foto machen", type=["jpg", "jpeg", "png"])
+# --- BILD-AUFNAHME (KAMERA AKTIV) ---
+# Hier nutzen wir nun camera_input für den direkten Zugriff
+uploaded_file = st.camera_input("Foto für die Analyse aufnehmen")
 
 if uploaded_file is not None:
     # Bild laden
@@ -38,7 +39,7 @@ if uploaded_file is not None:
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE)
     
-    # Graustufenwandlung
+    # Graustufenwandlung (MATLAB-Gewichte)
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
 
     # Kanten-Profil erstellen
@@ -72,36 +73,31 @@ if uploaded_file is not None:
         idx_r_list = np.where(suche_r_bereich[::-1] > kanten_sens)[0]
         x_rechts_a_px = start_r - idx_r_list[0] if len(idx_r_list) > 0 else len(kanten_profil)-1
 
-        # Berechnung der Zentren
+        # Berechnung der Korrektur
         zentrum_ist_px = (x_links_w_px + x_rechts_w_px) / 2.0
         zentrum_soll_px = (x_links_a_px + x_rechts_a_px) / 2.0
         abweichung_mm = (zentrum_ist_px - zentrum_soll_px) * mm_per_px
         umdrehungen = abs(abweichung_mm) / mm_pro_drehung
         anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
 
-        # --- NEU: LINIEN DIREKT INS BILD ZEICHNEN ---
-        # Wir erstellen eine Kopie für die Markierungen
+        # --- LINIEN ZEICHNEN VOR DEM ZOOM ---
         img_marked = img_rot.copy()
         h_img, w_img, _ = img_marked.shape
-        
-        # Zeichne vertikale Linien mit OpenCV
-        # Außen (Gelb)
+        # Außen (Gelb), Innen (Grün), Soll (Blau), Ist (Rot)
         cv2.line(img_marked, (int(x_links_a_px), 0), (int(x_links_a_px), h_img), (255, 255, 0), 4)
         cv2.line(img_marked, (int(x_rechts_a_px), 0), (int(x_rechts_a_px), h_img), (255, 255, 0), 4)
-        # Innen (Grün)
         cv2.line(img_marked, (int(x_links_w_px), 0), (int(x_links_w_px), h_img), (0, 255, 0), 4)
         cv2.line(img_marked, (int(x_rechts_w_px), 0), (int(x_rechts_w_px), h_img), (0, 255, 0), 4)
-        # Soll (Blau) & Ist (Rot)
         cv2.line(img_marked, (int(zentrum_soll_px), 0), (int(zentrum_soll_px), h_img), (0, 0, 255), 3)
         cv2.line(img_marked, (int(zentrum_ist_px), 0), (int(zentrum_ist_px), h_img), (255, 0, 0), 3)
 
-        # --- ERGEBNISSE ANZEIGEN ---
+        # --- ANZEIGE DER ERGEBNISSE ---
         col1, col2 = st.columns(2)
         col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
         col2.metric("Korrektur", f"{umdrehungen:.2f} Umdr.")
         st.info(f"👉 Bitte die Schraube **{anweisung}** drehen.")
 
-        # --- ZOOM-LOGIK (5x aus dem markierten Bild) ---
+        # --- DETAIL-ZOOM (5x) ---
         st.subheader("🔍 Detail-Ansicht Kanten (5x Zoom)")
         z_cols = st.columns(2)
         y_mid = h_img // 2 
@@ -114,25 +110,17 @@ if uploaded_file is not None:
             crop = img[y1:y2, x1:x2].copy()
             return cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
 
-        zoom_f = 5
-        zoom_s = 100 
-
-        # Zoom Links (Mitte zwischen gelber und grüner Linie)
+        zoom_f, zoom_s = 5, 80 
         x_mid_l = int((x_links_a_px + x_links_w_px) // 2)
-        zoom_l = get_zoom(img_marked, x_mid_l, y_mid, zoom_s, zoom_f)
-        z_cols[0].image(zoom_l, caption="Zoom Links (Linien sichtbar)", use_container_width=True)
-
-        # Zoom Rechts (Mitte zwischen grüner und gelber Linie)
         x_mid_r = int((x_rechts_w_px + x_rechts_a_px) // 2)
-        zoom_r = get_zoom(img_marked, x_mid_r, y_mid, zoom_s, zoom_f)
-        z_cols[1].image(zoom_r, caption="Zoom Rechts (Linien sichtbar)", use_container_width=True)
+
+        z_cols[0].image(get_zoom(img_marked, x_mid_l, y_mid, zoom_s, zoom_f), caption="Zoom Links", use_container_width=True)
+        z_cols[1].image(get_zoom(img_marked, x_mid_r, y_mid, zoom_s, zoom_f), caption="Zoom Rechts", use_container_width=True)
 
         # --- HAUPTGRAFIK ---
-        # Hier nutzen wir das markierte Bild direkt für die Anzeige
         st.subheader("Kamera-Analyse")
         st.image(img_marked, use_container_width=True)
 
-        # Kantenprofil-Plot separat
         fig, ax = plt.subplots(figsize=(10, 4))
         x_mm = (np.arange(len(kanten_profil)) - x_links_a_px) * mm_per_px
         ax.plot(x_mm, kanten_profil, color='black')
