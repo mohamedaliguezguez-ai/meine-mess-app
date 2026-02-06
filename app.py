@@ -13,7 +13,6 @@ st.write("Nutze die Seitenleiste, um die Empfindlichkeit anzupassen.")
 # --- SEITENLEISTE (EINSTELLUNGEN) ---
 st.sidebar.header("Einstellungen")
 
-# Hier ist dein gewünschter Schieberegler
 kanten_sens = st.sidebar.slider(
     "Kanten-Sensibilität", 
     min_value=0.01, 
@@ -39,7 +38,7 @@ if uploaded_file is not None:
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE)
     
-    # Graustufenwandlung (Deine MATLAB-Gewichte)
+    # Graustufenwandlung (MATLAB-Gewichte)
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
 
     # Kanten-Profil erstellen
@@ -62,7 +61,7 @@ if uploaded_file is not None:
         offset_px = int(round(such_offset_mm * px_pro_mm))
         mm_per_px = 1.0 / px_pro_mm
 
-        # Außenkanten (Gelb) mit dem Slider-Wert
+        # Außenkanten (Gelb)
         start_l = max(0, x_links_w_px - offset_px)
         suche_l_bereich = kanten_profil[start_l : x_links_w_px - 5]
         idx_l_list = np.where(suche_l_bereich > kanten_sens)[0]
@@ -87,7 +86,33 @@ if uploaded_file is not None:
         
         st.info(f"👉 Bitte die Schraube **{anweisung}** drehen.")
 
-        # Grafiken erstellen
+        # --- NEU: ZOOM-LOGIK (10x Vergrößerung) ---
+        st.subheader("🔍 Detail-Ansicht Kanten (10x Zoom)")
+        z_cols = st.columns(2)
+        
+        zoom_h, zoom_w = 100, 100 # Ausschnittgröße in Pixeln
+        y_mid = img_rot.shape[0] // 2 # Vertikale Mitte für den Zoom
+
+        def get_zoom(img, x_center, y_center, size, scale=10):
+            x1 = max(0, x_center - size // 2)
+            x2 = min(img.shape[1], x_center + size // 2)
+            y1 = max(0, y_center - size // 2)
+            y2 = min(img.shape[0], y_center + size // 2)
+            crop = img[y1:y2, x1:x2].copy()
+            # 10-fache Vergrößerung mit scharfen Kanten (INTER_NEAREST)
+            return cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+
+        # Linker Zoom (Zentrum zwischen Gelb und Grün links)
+        x_mid_l = (x_links_a_px + x_links_w_px) // 2
+        zoom_l = get_zoom(img_rot, x_mid_l, y_mid, 60)
+        z_cols[0].image(zoom_l, caption="Zoom Linke Kante", use_container_width=True)
+
+        # Rechter Zoom (Zentrum zwischen Gelb und Grün rechts)
+        x_mid_r = (x_rechts_a_px + x_rechts_w_px) // 2
+        zoom_r = get_zoom(img_rot, x_mid_r, y_mid, 60)
+        z_cols[1].image(zoom_r, caption="Zoom Rechte Kante", use_container_width=True)
+
+        # --- HAUPTGRAFIKEN ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
         ax1.imshow(img_rot.astype(np.uint8))
         ax1.axvline(x_links_a_px, color='yellow', linewidth=3, label='Außen (Gelb)')
