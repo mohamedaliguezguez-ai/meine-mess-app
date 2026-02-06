@@ -93,42 +93,35 @@ if uploaded_file is not None:
         y_mid = img_rot.shape[0] // 2 
 
         def get_zoom_with_arrows(img, x_center, y_center, size, scale, marks):
-            """
-            Erstellt einen Zoom-Ausschnitt und zeichnet Pfeile an die Kantenpositionen.
-            marks: Liste von Tupeln (x_pixel_position, farbe_rgb)
-            """
             x1 = max(0, x_center - size // 2)
             y1 = max(0, y_center - size // 2)
             x2 = min(img.shape[1], x_center + size // 2)
             y2 = min(img.shape[0], y_center + size // 2)
             
             crop = img[y1:y2, x1:x2].copy()
-            # Resize auf 5-fach
             resized = cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
             
             for x_px, color in marks:
-                # Relative Position im vergrößerten Bild berechnen
                 rel_x = int((x_px - x1) * scale)
                 if 0 <= rel_x < resized.shape[1]:
-                    # Pfeil von oben zeichnen (Startpunkt, Endpunkt, Farbe, Dicke, Spitzenlänge)
-                    cv2.arrowedLine(resized, (rel_x, 10), (rel_x, 50), color, 4, tipLength=0.4)
+                    # Pfeile einzeichnen (Gelb/Grün)
+                    cv2.arrowedLine(resized, (rel_x, 10), (rel_x, 60), color, 4, tipLength=0.3)
             return resized
 
-        # Zoom-Faktor auf 5 gesetzt
-zoom_factor = 5
-        zoom_size = 80 # Ausschnitt etwas größer gewählt für bessere Übersicht
+        zoom_factor = 5
+        zoom_size = 100 
 
-        # Linker Zoom: Gelbe Außenkante und grüne Innenkante
+        # Linker Zoom
         marks_l = [(x_links_a_px, (255, 255, 0)), (x_links_w_px, (0, 255, 0))]
         x_mid_l = (x_links_a_px + x_links_w_px) // 2
         zoom_img_l = get_zoom_with_arrows(img_rot, x_mid_l, y_mid, zoom_size, zoom_factor, marks_l)
-        z_cols[0].image(zoom_img_l, caption="Zoom Links (Gelb=Außen, Grün=Innen)", use_container_width=True)
+        z_cols[0].image(zoom_img_l, caption="Links (Gelb=Außen, Grün=Innen)", use_container_width=True)
 
-        # Rechter Zoom: Grüne Innenkante und gelbe Außenkante
+        # Rechter Zoom
         marks_r = [(x_rechts_w_px, (0, 255, 0)), (x_rechts_a_px, (255, 255, 0))]
         x_mid_r = (x_rechts_a_px + x_rechts_w_px) // 2
         zoom_img_r = get_zoom_with_arrows(img_rot, x_mid_r, y_mid, zoom_size, zoom_factor, marks_r)
-        z_cols[1].image(zoom_img_r, caption="Zoom Rechts (Grün=Innen, Gelb=Außen)", use_container_width=True)
+        z_cols[1].image(zoom_img_r, caption="Rechts (Grün=Innen, Gelb=Außen)", use_container_width=True)
 
         # --- HAUPTGRAFIKEN ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
@@ -151,4 +144,4 @@ zoom_factor = 5
         
         st.pyplot(fig)
     else:
-        st.error("Weißer Bereich nicht erkannt. Erhöhe die Helligkeit oder prüfe den Weißabgleich.")
+        st.error("Weißer Bereich nicht erkannt. Prüfe Licht und Ausrichtung.")
