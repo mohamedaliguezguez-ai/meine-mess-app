@@ -86,31 +86,49 @@ if uploaded_file is not None:
         
         st.info(f"👉 Bitte die Schraube **{anweisung}** drehen.")
 
-        # --- NEU: ZOOM-LOGIK (10x Vergrößerung) ---
-        st.subheader("🔍 Detail-Ansicht Kanten (10x Zoom)")
+        # --- ZOOM-LOGIK (5x Vergrößerung mit Pfeilen) ---
+        st.subheader("🔍 Detail-Ansicht Kanten (5x Zoom)")
         z_cols = st.columns(2)
         
-        zoom_h, zoom_w = 100, 100 # Ausschnittgröße in Pixeln
-        y_mid = img_rot.shape[0] // 2 # Vertikale Mitte für den Zoom
+        y_mid = img_rot.shape[0] // 2 
 
-        def get_zoom(img, x_center, y_center, size, scale=10):
+        def get_zoom_with_arrows(img, x_center, y_center, size, scale, marks):
+            """
+            Erstellt einen Zoom-Ausschnitt und zeichnet Pfeile an die Kantenpositionen.
+            marks: Liste von Tupeln (x_pixel_position, farbe_rgb)
+            """
             x1 = max(0, x_center - size // 2)
-            x2 = min(img.shape[1], x_center + size // 2)
             y1 = max(0, y_center - size // 2)
+            x2 = min(img.shape[1], x_center + size // 2)
             y2 = min(img.shape[0], y_center + size // 2)
+            
             crop = img[y1:y2, x1:x2].copy()
-            # 10-fache Vergrößerung mit scharfen Kanten (INTER_NEAREST)
-            return cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            # Resize auf 5-fach
+            resized = cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            
+            for x_px, color in marks:
+                # Relative Position im vergrößerten Bild berechnen
+                rel_x = int((x_px - x1) * scale)
+                if 0 <= rel_x < resized.shape[1]:
+                    # Pfeil von oben zeichnen (Startpunkt, Endpunkt, Farbe, Dicke, Spitzenlänge)
+                    cv2.arrowedLine(resized, (rel_x, 10), (rel_x, 50), color, 4, tipLength=0.4)
+            return resized
 
-        # Linker Zoom (Zentrum zwischen Gelb und Grün links)
+        # Zoom-Faktor auf 5 gesetzt
+zoom_factor = 5
+        zoom_size = 80 # Ausschnitt etwas größer gewählt für bessere Übersicht
+
+        # Linker Zoom: Gelbe Außenkante und grüne Innenkante
+        marks_l = [(x_links_a_px, (255, 255, 0)), (x_links_w_px, (0, 255, 0))]
         x_mid_l = (x_links_a_px + x_links_w_px) // 2
-        zoom_l = get_zoom(img_rot, x_mid_l, y_mid, 60)
-        z_cols[0].image(zoom_l, caption="Zoom Linke Kante", use_container_width=True)
+        zoom_img_l = get_zoom_with_arrows(img_rot, x_mid_l, y_mid, zoom_size, zoom_factor, marks_l)
+        z_cols[0].image(zoom_img_l, caption="Zoom Links (Gelb=Außen, Grün=Innen)", use_container_width=True)
 
-        # Rechter Zoom (Zentrum zwischen Gelb und Grün rechts)
+        # Rechter Zoom: Grüne Innenkante und gelbe Außenkante
+        marks_r = [(x_rechts_w_px, (0, 255, 0)), (x_rechts_a_px, (255, 255, 0))]
         x_mid_r = (x_rechts_a_px + x_rechts_w_px) // 2
-        zoom_r = get_zoom(img_rot, x_mid_r, y_mid, 60)
-        z_cols[1].image(zoom_r, caption="Zoom Rechte Kante", use_container_width=True)
+        zoom_img_r = get_zoom_with_arrows(img_rot, x_mid_r, y_mid, zoom_size, zoom_factor, marks_r)
+        z_cols[1].image(zoom_img_r, caption="Zoom Rechts (Grün=Innen, Gelb=Außen)", use_container_width=True)
 
         # --- HAUPTGRAFIKEN ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
