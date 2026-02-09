@@ -3,46 +3,65 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from scipy.signal import convolve2d
+from PIL import Image, ImageOps
 
 # --- APP KONFIGURATION ---
 st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
 
 st.title("🛠 Profil-Mess-App Pro")
-st.write("Die Kamera ist aktiv. Bitte positioniere das Bauteil und mache ein Foto.")
 
-# --- SEITENLEISTE (EINSTELLUNGEN AUS SCREENSHOT) ---
+# --- SEITENLEISTE (EINSTELLUNGEN) ---
 st.sidebar.header("Einstellungen")
+
+# NEU: Auswahl der Ausrichtung
+orientierung = st.sidebar.radio(
+    "Wie liegt das Bauteil im Bild?",
+    ("Horizontal (Liegend)", "Vertikal (Stehend)"),
+    help="Wähle 'Horizontal', wenn das Bauteil quer im Bild liegt (z.B. bei Screenshots)."
+)
 
 kanten_sens = st.sidebar.slider(
     "Kanten-Sensibilität", 
-    min_value=0.01, 
-    max_value=0.30, 
-    value=0.14,  # Wert aus Screenshot übernommen
-    step=0.01,
-    help="Niedriger Wert = erkennt feinste Kanten. Hoher Wert = ignoriert Schatten."
+    min_value=0.01, max_value=0.30, value=0.14, step=0.01
 )
+ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=60.00)
+such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 3, 30, 10)
+mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
 
-ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=90.00) # Wert aus Screenshot
-such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 3, 30, 5) # Wert aus Screenshot
-mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75) # Wert aus Screenshot
+# --- BILD-EINGABE ---
+input_method = st.radio("Bildquelle:", ("Kamera nutzen", "Screenshot / Datei hochladen"))
 
-# --- BILD-AUFNAHME (KAMERA AKTIV) ---
-# Hier nutzen wir nun camera_input für den direkten Zugriff
-uploaded_file = st.camera_input("Foto für die Analyse aufnehmen")
+uploaded_file = None
+if input_method == "Kamera nutzen":
+    uploaded_file = st.camera_input("Foto aufnehmen")
+else:
+    uploaded_file = st.file_uploader("Screenshot oder Bilddatei auswählen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Bild laden
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img_bgr = cv2.imdecode(file_bytes, 1)
+    # 1. Bild laden & Handy-Drehung korrigieren
+    pil_img = Image.open(uploaded_file)
+    pil_img = ImageOps.exif_transpose(pil_img)
     
-    # Verarbeitung
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE)
+    # 2. Größenoptimierung (S25 Ultra / High-Res Screenshots)
+    if pil_img.width > 2000:
+        ratio = 2000 / float(pil_img.width)
+        new_h = int(float(pil_img.height) * float(ratio))
+        pil_img = pil_img.resize((2000, new_h), Image.Resampling.LANCZOS)
     
-    # Graustufenwandlung (MATLAB-Gewichte)
-    gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
+    img_rgb = np.array(pil_img.convert('RGB'))
+    
+    # --- LOGIK FÜR DIE DREHUNG ---
+    # Unser Scan braucht das Profil immer vertikal (stehend), 
+    # damit er von links nach rechts messen kann.
+    if orientierung == "Horizontal (Liegend)":
+        # Wenn es liegt, drehen wir es einmal um 90 Grad
+        img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE)
+    else:
+        # Wenn es bereits steht, lassen wir es so
+        img_rot = img_rgb
 
-    # Kanten-Profil erstellen
+    # --- MESS-ANALYSE ---
+    gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
     kernel = np.ones((5, 5), np.float64) / 25.0
     gray_smooth = convolve2d(gray, kernel, mode='same')
     h_grad = np.abs(np.diff(gray_smooth, axis=1))
@@ -50,14 +69,13 @@ if uploaded_file is not None:
     kanten_profil = np.mean(h_grad, axis=0)
     kanten_profil = kanten_profil / np.max(kanten_profil)
 
-    # Innenkanten (Grün) finden
+    # Innenkanten (Grün)
     bw_weiss = gray > 180
     x_proj_w = np.sum(bw_weiss, axis=0)
     weiss_idx = np.where(x_proj_w > (np.max(x_proj_w) * 0.5))[0]
     
     if len(weiss_idx) > 0:
-        x_links_w_px = weiss_idx[0]
-        x_rechts_w_px = weiss_idx[-1]
+        x_links_w_px = weiss_idx[0]; x_rechts_w_px = weiss_idx[-1]
         px_pro_mm = (x_rechts_w_px - x_links_w_px) / ref_weiss_mm
         offset_px = int(round(such_offset_mm * px_pro_mm))
         mm_per_px = 1.0 / px_pro_mm
@@ -80,55 +98,20 @@ if uploaded_file is not None:
         umdrehungen = abs(abweichung_mm) / mm_pro_drehung
         anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
 
-        # --- LINIEN ZEICHNEN VOR DEM ZOOM ---
-        img_marked = img_rot.copy()
-        h_img, w_img, _ = img_marked.shape
-        # Außen (Gelb), Innen (Grün), Soll (Blau), Ist (Rot)
-        cv2.line(img_marked, (int(x_links_a_px), 0), (int(x_links_a_px), h_img), (255, 255, 0), 4)
-        cv2.line(img_marked, (int(x_rechts_a_px), 0), (int(x_rechts_a_px), h_img), (255, 255, 0), 4)
-        cv2.line(img_marked, (int(x_links_w_px), 0), (int(x_links_w_px), h_img), (0, 255, 0), 4)
-        cv2.line(img_marked, (int(x_rechts_w_px), 0), (int(x_rechts_w_px), h_img), (0, 255, 0), 4)
-        cv2.line(img_marked, (int(zentrum_soll_px), 0), (int(zentrum_soll_px), h_img), (0, 0, 255), 3)
-        cv2.line(img_marked, (int(zentrum_ist_px), 0), (int(zentrum_ist_px), h_img), (255, 0, 0), 3)
-
-        # --- ANZEIGE DER ERGEBNISSE ---
+        # Ergebnisse anzeigen
         col1, col2 = st.columns(2)
         col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
         col2.metric("Korrektur", f"{umdrehungen:.2f} Umdr.")
-        st.info(f"👉 Bitte die Schraube **{anweisung}** drehen.")
+        st.success(f"Drehe die Schraube **{anweisung}**.")
 
-        # --- DETAIL-ZOOM (5x) ---
-        st.subheader("🔍 Detail-Ansicht Kanten (5x Zoom)")
-        z_cols = st.columns(2)
-        y_mid = h_img // 2 
-
-        def get_zoom(img, x_center, y_center, size, scale):
-            x1 = max(0, x_center - size // 2)
-            y1 = max(0, y_center - size // 2)
-            x2 = min(img.shape[1], x_center + size // 2)
-            y2 = min(img.shape[0], y_center + size // 2)
-            crop = img[y1:y2, x1:x2].copy()
-            return cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
-
-        zoom_f, zoom_s = 5, 80 
-        x_mid_l = int((x_links_a_px + x_links_w_px) // 2)
-        x_mid_r = int((x_rechts_w_px + x_rechts_a_px) // 2)
-
-        z_cols[0].image(get_zoom(img_marked, x_mid_l, y_mid, zoom_s, zoom_f), caption="Zoom Links", use_container_width=True)
-        z_cols[1].image(get_zoom(img_marked, x_mid_r, y_mid, zoom_s, zoom_f), caption="Zoom Rechts", use_container_width=True)
-
-        # --- HAUPTGRAFIK ---
-        st.subheader("Kamera-Analyse")
-        st.image(img_marked, use_container_width=True)
-
-        fig, ax = plt.subplots(figsize=(10, 4))
-        x_mm = (np.arange(len(kanten_profil)) - x_links_a_px) * mm_per_px
-        ax.plot(x_mm, kanten_profil, color='black')
-        ax.axhline(kanten_sens, color='red', linestyle='--', label='Schwelle')
-        ax.set_xlabel("Position [mm]")
-        ax.set_ylabel("Kantenstärke")
-        ax.grid(True)
-        st.pyplot(fig)
+        # Zeichnen
+        img_marked = img_rot.copy()
+        h_img, w_img, _ = img_marked.shape
+        cv2.line(img_marked, (int(x_links_a_px), 0), (int(x_links_a_px), h_img), (255, 255, 0), 6)
+        cv2.line(img_marked, (int(x_rechts_a_px), 0), (int(x_rechts_a_px), h_img), (255, 255, 0), 6)
+        cv2.line(img_marked, (int(x_links_w_px), 0), (int(x_links_w_px), h_img), (0, 255, 0), 6)
+        cv2.line(img_marked, (int(x_rechts_w_px), 0), (int(x_rechts_w_px), h_img), (0, 255, 0), 6)
         
+        st.image(img_marked, caption="Analyse (wird für Messung intern immer aufrecht gestellt)", use_container_width=True)
     else:
-        st.error("Weißer Bereich nicht erkannt. Bitte Ausrichtung prüfen.")
+        st.error("Weißer Bereich ($90\text{ mm}$) nicht gefunden.")
