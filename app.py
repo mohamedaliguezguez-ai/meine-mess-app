@@ -13,7 +13,6 @@ st.title("🛠 Profil-Mess-App Pro")
 # --- SEITENLEISTE (EINSTELLUNGEN) ---
 st.sidebar.header("Einstellungen")
 
-# NEU: Auswahl der Ausrichtung
 orientierung = st.sidebar.radio(
     "Wie liegt das Bauteil im Bild?",
     ("Horizontal (Liegend)", "Vertikal (Stehend)"),
@@ -24,7 +23,7 @@ kanten_sens = st.sidebar.slider(
     "Kanten-Sensibilität", 
     min_value=0.01, max_value=0.30, value=0.14, step=0.01
 )
-ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=60.00)
+ref_weiss_mm = st.sidebar.number_input("Referenzbreite Weiß (mm)", value=90.00)
 such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 3, 30, 10)
 mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
 
@@ -51,13 +50,9 @@ if uploaded_file is not None:
     img_rgb = np.array(pil_img.convert('RGB'))
     
     # --- LOGIK FÜR DIE DREHUNG ---
-    # Unser Scan braucht das Profil immer vertikal (stehend), 
-    # damit er von links nach rechts messen kann.
     if orientierung == "Horizontal (Liegend)":
-        # Wenn es liegt, drehen wir es einmal um 90 Grad
         img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE)
     else:
-        # Wenn es bereits steht, lassen wir es so
         img_rot = img_rgb
 
     # --- MESS-ANALYSE ---
@@ -98,20 +93,52 @@ if uploaded_file is not None:
         umdrehungen = abs(abweichung_mm) / mm_pro_drehung
         anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
 
-        # Ergebnisse anzeigen
+        # --- ERGEBNIS-METRIKEN ---
         col1, col2 = st.columns(2)
         col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
         col2.metric("Korrektur", f"{umdrehungen:.2f} Umdr.")
         st.success(f"Drehe die Schraube **{anweisung}**.")
 
-        # Zeichnen
+        # --- ZEICHNEN DER LINIEN ---
         img_marked = img_rot.copy()
         h_img, w_img, _ = img_marked.shape
-        cv2.line(img_marked, (int(x_links_a_px), 0), (int(x_links_a_px), h_img), (255, 255, 0), 6)
-        cv2.line(img_marked, (int(x_rechts_a_px), 0), (int(x_rechts_a_px), h_img), (255, 255, 0), 6)
-        cv2.line(img_marked, (int(x_links_w_px), 0), (int(x_links_w_px), h_img), (0, 255, 0), 6)
-        cv2.line(img_marked, (int(x_rechts_w_px), 0), (int(x_rechts_w_px), h_img), (0, 255, 0), 6)
-        
-        st.image(img_marked, caption="Analyse (wird für Messung intern immer aufrecht gestellt)", use_container_width=True)
+        # Farben: Gelb (255,255,0), Grün (0,255,0), Blau/Soll (0,0,255), Rot/Ist (255,0,0)
+        cv2.line(img_marked, (int(x_links_a_px), 0), (int(x_links_a_px), h_img), (255, 255, 0), 8)
+        cv2.line(img_marked, (int(x_rechts_a_px), 0), (int(x_rechts_a_px), h_img), (255, 255, 0), 8)
+        cv2.line(img_marked, (int(x_links_w_px), 0), (int(x_links_w_px), h_img), (0, 255, 0), 8)
+        cv2.line(img_marked, (int(x_rechts_w_px), 0), (int(x_rechts_w_px), h_img), (0, 255, 0), 8)
+        cv2.line(img_marked, (int(zentrum_soll_px), 0), (int(zentrum_soll_px), h_img), (0, 0, 255), 4)
+        cv2.line(img_marked, (int(zentrum_ist_px), 0), (int(zentrum_ist_px), h_img), (255, 0, 0), 4)
+
+        # --- DETAIL-ZOOM (5x) ---
+        st.subheader("🔍 Detail-Ansicht Kanten (Zoom)")
+        z_cols = st.columns(2)
+        y_mid = h_img // 2 
+
+        def get_zoom(img, x_center, y_center, size, scale):
+            x1 = max(0, int(x_center - size // 2))
+            y1 = max(0, int(y_center - size // 2))
+            x2 = min(img.shape[1], int(x_center + size // 2))
+            y2 = min(img.shape[0], int(y_center + size // 2))
+            crop = img[y1:y2, x1:x2].copy()
+            if crop.size == 0: return np.zeros((100,100,3), dtype=np.uint8)
+            return cv2.resize(crop, (None, None), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+
+        zoom_f, zoom_s = 5, 100 
+        z_cols[0].image(get_zoom(img_marked, x_links_a_px, y_mid, zoom_s, zoom_f), caption="Zoom Links", use_container_width=True)
+        z_cols[1].image(get_zoom(img_marked, x_rechts_a_px, y_mid, zoom_s, zoom_f), caption="Zoom Rechts", use_container_width=True)
+
+        # --- HAUPTBILD & DIAGRAMM ---
+        st.subheader("Analyse-Übersicht")
+        st.image(img_marked, use_container_width=True)
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        x_mm = (np.arange(len(kanten_profil)) - x_links_a_px) * mm_per_px
+        ax.plot(x_mm, kanten_profil, color='black')
+        ax.axhline(kanten_sens, color='red', linestyle='--', label='Schwelle')
+        ax.set_xlabel("Position [mm]")
+        ax.set_ylabel("Kantenstärke")
+        ax.grid(True)
+        st.pyplot(fig)
     else:
         st.error("Weißer Bereich ($90\text{ mm}$) nicht gefunden.")
