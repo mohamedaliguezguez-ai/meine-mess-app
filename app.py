@@ -5,6 +5,17 @@ import matplotlib.pyplot as plt
 from scipy.signal import convolve2d
 from PIL import Image, ImageOps
 
+def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
+    """
+    Berechnet die physikalische Toleranz/Unsicherheit der Messung in mm.
+    :param px_pro_mm: Der berechnete Maßstab (Pixel pro Millimeter).
+    :param unsicherheit_px: Geschätzter Fehler in Pixeln (Standard: 1.5 px).
+    :return: Toleranzwert in mm.
+    """
+    if px_pro_mm > 0:
+        return unsicherheit_px / px_pro_mm
+    return 0.0
+
 # --- APP KONFIGURATION ---
 st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
 
@@ -105,6 +116,23 @@ if uploaded_file is not None:
         abweichung_mm = (zentrum_ist_px - zentrum_soll_px) * mm_per_px
         umdrehungen = abs(abweichung_mm) / mm_pro_drehung
         anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
+
+	# ... (dein restlicher Code zur Berechnung von abweichung_mm) ...
+
+	# 1. Toleranz berechnen
+	toleranz_mm = berechne_mess_toleranz(px_pro_mm)
+
+	# 2. Anzeige in den Metriken erweitern
+	col1, col2, col3 = st.columns(3) # Von 2 auf 3 Spalten erweitert
+	col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
+	col2.metric("Toleranz (±)", f"{toleranz_mm:.2f} mm") # Neu: Anzeige der Messunsicherheit
+	col3.metric("Korrektur", f"{umdrehungen:.2f} Umdr.")
+
+	# 3. Logik-Check: Ist die Abweichung überhaupt signifikant?
+	if abs(abweichung_mm) <= toleranz_mm:
+    	st.info(f"Das Bauteil liegt innerhalb der Messtoleranz ({toleranz_mm:.2f} mm) und gilt als zentriert.")
+	else:
+    	st.success(f"Drehe die Schraube **{anweisung}**.")
 
         # --- VISUALISIERUNG & METRIKEN ---
         col1, col2 = st.columns(2)
