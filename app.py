@@ -10,12 +10,41 @@ def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
     if px_pro_mm > 0:
         return unsicherheit_px / px_pro_mm
     return 0.0
-
+    
+def auto_begradigen(img_rgb):
+    """Richtet das Bild automatisch horizontal aus."""
+    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    blur = cv2.GaussianBlur(gray, (7, 7), 0)
+    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return img_rgb, 0.0
+    
+    c = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(c)
+    angle = rect[-1]
+    
+    # Korrektur des Winkels für OpenCV 4.5+
+    if angle < -45:
+        angle = -(90 + angle)
+    elif angle > 45:
+        angle = 90 - angle
+    else:
+        angle = -angle
+        
+    (h, w) = img_rgb.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated, angle
+    
 # --- APP KONFIGURATION ---
 st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
 st.title("🛠 Profil-Mess-App Pro")
 
 # --- SEITENLEISTE ---
+
 st.sidebar.header("Configuration")
 orientierung = st.sidebar.radio("Component position:", ("Horizontal (Lying)", "Vertical (Standing)"))
 kanten_sens = st.sidebar.slider("edge sensitivity", 0.01, 0.50, 0.14, 0.01)
@@ -23,6 +52,7 @@ ref_weiss_mm = st.sidebar.number_input("Reference width inside (mm)", value=60.0
 #such_offset_px_val = st.sidebar.slider("Search offset (pixels)", 1, 100, 30)
 such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 0.5, 20.0, 5.0, 0.5)
 mm_pro_drehung = st.sidebar.number_input("mm per revolution", value=0.75)
+do_auto_level = st.sidebar.checkbox("Bilder automatisch begradigen", value=True)
 
 # --- BILD-EINGABE ---
 input_method = st.radio("Image source:", ("Use camera", "Screenshot / Upload file"))
@@ -37,6 +67,11 @@ if uploaded_file is not None:
     
     img_rgb = np.array(pil_img.convert('RGB'))
     img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Lying)" else img_rgb
+
+    # ... (nach der Zeile img_rot = cv2.rotate...)
+    if do_auto_level:
+        img_rot, gefundener_winkel = auto_begradigen(img_rot)
+        st.sidebar.info(f"Korrektur-Winkel: {gefundener_winkel:.2f}°")
 
     # 2. Analyse
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
@@ -107,6 +142,27 @@ if uploaded_file is not None:
         
         st.subheader("Analysis overview")
         st.image(img_marked, use_container_width=True)
+
+        # --- DIAGRAMM UNTER DER ABBILDUNG ---
+        st.divider()
+        st.subheader("📊 Kanten-Signal-Analyse")
+        
+        fig, ax = plt.subplots(figsize=(10, 3))
+        # Plot des Profils
+        ax.plot(kanten_profil, color='cyan', label='Kontrast-Stärke')
+        # Schwellenwert-Linie
+        ax.axhline(y=kanten_sens, color='red', linestyle='--', label='Schwelle')
+        
+        # Positionen der gefundenen Kanten markieren
+        ax.axvline(x=x_links_w_px, color='green', alpha=0.5, label='Innen')
+        ax.axvline(x=x_rechts_w_px, color='green', alpha=0.5)
+        ax.axvline(x=x_links_a_px, color='orange', alpha=0.5, label='Außen')
+        ax.axvline(x=x_rechts_a_px, color='orange', alpha=0.5)
+
+        ax.set_ylim(0, 1.1)
+        ax.set_title("Verlauf der Kantenstärken (Peaks)")
+        ax.legend(loc='upper right')
+        st.pyplot(fig)
         # --- GRADIENTEN-DIAGRAMM ---
         st.divider()
         st.subheader("📊 Signal-Analyse: Kanten-Profil")
@@ -151,6 +207,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
