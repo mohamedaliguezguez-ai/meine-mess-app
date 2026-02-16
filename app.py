@@ -12,40 +12,43 @@ def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
     return 0.0
     
 def auto_begradigen(img_rgb):
-    """Richtet das Bild aus und ignoriert dabei den äußeren Rand."""
+    """Richtet das Bild aus und ignoriert den äußeren Rand."""
     h, w = img_rgb.shape[:2]
     
-    # 1. Wir erstellen eine Kopie nur für die Analyse und schneiden 5% vom Rand weg
-    # Damit der Bildrahmen nicht als Kontur erkannt wird.
-    margin_h = int(h * 0.05)
-    margin_w = int(w * 0.05)
-    analyse_zone = img_rgb[margin_h:h-margin_h, margin_w:w-margin_w]
+    # Wir betrachten nur das innere Zentrum (10% Rand ignorieren)
+    # So werden die äußeren Bildkanten für die Winkelberechnung unsichtbar
+    crop_h = int(h * 0.1)
+    crop_w = int(w * 0.1)
+    center_zone = img_rgb[crop_h:h-crop_h, crop_w:w-crop_w]
     
-    gray = cv2.cvtColor(analyse_zone, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(center_zone, cv2.COLOR_RGB2GRAY)
     blur = cv2.GaussianBlur(gray, (9, 9), 0)
     
-    # Kanten finden (Canny ist hier meist besser als Threshold)
+    # Canny findet die echten Kanten des Bauteils
     edged = cv2.Canny(blur, 50, 150)
-    
     contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
         return img_rgb, 0.0
     
-    # Die größte Kontur im inneren Bereich suchen
+    # Das größte Objekt im Zentrum finden
     c = max(contours, key=cv2.contourArea)
-    
-    # Winkel des umschließenden Rechtecks berechnen
     rect = cv2.minAreaRect(c)
     angle = rect[-1]
     
-    # OpenCV Winkel-Logik korrigieren
+    # Korrektur der OpenCV-Winkel-Logik
     if angle < -45:
         angle = -(90 + angle)
     elif angle > 45:
         angle = 90 - angle
     else:
         angle = -angle
+        
+    # Die Rotation auf das VOLLE Bild anwenden
+    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+    rotated = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    
+    return rotated, angle
         
     # 2. Die Rotation auf das ORIGINALE (volle) Bild anwenden
     center = (w // 2, h // 2)
@@ -77,25 +80,25 @@ uploaded_file = st.camera_input("Foto") if input_method == "Use camera" else st.
 
 if uploaded_file is not None:
     # 1. Vorbereitung
-    pil_img = ImageOps.exif_transpose(Image.open(uploaded_file))
-    if pil_img.width > 2000:
-        ratio = 2000 / float(pil_img.width)
-        pil_img = pil_img.resize((2000, int(pil_img.height * ratio)), Image.Resampling.LANCZOS)
-    
-    img_rgb = np.array(pil_img.convert('RGB'))
-    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Lying)" else img_rgb
 
-    # ... (nach der Zeile img_rot = cv2.rotate...)
+    # --- 1. VORBEREITUNG & BEGRADIGUNG ---
+    # Variablen sicher initialisieren, um NameError zu vermeiden
+    auto_angle = 0.0
+    
+    # Automatik-Logik (mit Rand-Ignorierung)
     if do_auto_level:
-        img_rot, gefundener_winkel = auto_begradigen(img_rot)
-        st.sidebar.info(f"Korrektur-Winkel: {gefundener_winkel:.2f}°")
-   # Dann die manuelle Fein-Justierung oben drauf
-    if manual_angle != 0:
+        img_rot, auto_angle = auto_begradigen(img_rot)
+    
+    # Manuelle Fein-Justierung (manual_angle kommt vom Slider in der Sidebar)
+    if manual_angle != 0.0:
         (h, w) = img_rot.shape[:2]
-        M_manual = cv2.getRotationMatrix2D((w // 2, h // 2), manual_angle, 1.0)
+        center = (w // 2, h // 2)
+        M_manual = cv2.getRotationMatrix2D(center, manual_angle, 1.0)
         img_rot = cv2.warpAffine(img_rot, M_manual, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     
-    st.sidebar.caption(f"Korrektur Gesamt: {auto_angle + manual_angle:.2f}°")     
+    # Anzeige der Korrektur in der Sidebar ohne Absturzgefahr
+    gesamt_korrektur = auto_angle + manual_angle
+    st.sidebar.caption(f"Korrektur Gesamt: {gesamt_korrektur:.2f}°")
 
     # 2. Analyse
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
@@ -231,6 +234,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
