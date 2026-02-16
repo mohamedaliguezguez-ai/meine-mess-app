@@ -83,7 +83,7 @@ if uploaded_file is not None:
         if umdrehungen < 0.25:
             st.info(f"✅ Centered (Deviation < 0.2 mm)")
         else:
-            st.success(f"⚙️ Turn the Screw to the **{anweisung}**.")
+            st.success(f"⚙️ Turn the Screw **{umdrehungen}** to the **{anweisung}**.")
 
         # --- VISUALISIERUNG ---
         img_marked = img_rot.copy()
@@ -108,6 +108,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
