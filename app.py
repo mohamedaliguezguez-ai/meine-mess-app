@@ -1,120 +1,140 @@
 import streamlit as st
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
 from scipy.signal import convolve2d
 from PIL import Image, ImageOps
 
+# --- HILFSFUNKTIONEN ---
 def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
-    """Berechnet die physikalische Toleranz der Messung in mm."""
     if px_pro_mm > 0:
         return unsicherheit_px / px_pro_mm
     return 0.0
 
+def get_edge_line(grad_img, rows, x_start, x_end, sensitivity):
+    """Sucht in den angegebenen Zeilen nach dem Peak und fittet eine Gerade x = m*y + b"""
+    pts_x = []
+    pts_y = []
+    
+    # Globales Maximum für relative Sensitivität
+    max_grad = np.max(grad_img)
+    
+    for y in rows:
+        # Bereich extrahieren (Sicherstellen, dass Indizes innerhalb des Bildes liegen)
+        x1, x2 = max(0, int(x_start)), min(grad_img.shape[1], int(x_end))
+        if x1 >= x2: continue
+        
+        row_segment = grad_img[y, x1:x2]
+        if len(row_segment) == 0: continue
+        
+        rel_idx = np.argmax(row_segment)
+        if row_segment[rel_idx] > (sensitivity * max_grad):
+            pts_x.append(x1 + rel_idx)
+            pts_y.append(y)
+            
+    if len(pts_x) > 5: # Mindestens 5 Punkte für eine stabile Gerade
+        m, b = np.polyfit(pts_y, pts_x, 1)
+        return m, b
+    return None
+
 # --- APP KONFIGURATION ---
-st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
-st.title("🛠 Profil-Mess-App Pro")
+st.set_page_config(page_title="Präzisions-Analyse Pro (Line-by-Line)", layout="centered")
+st.title("🛠 Profil-Mess-App: Zeilen-Analyse")
 
 # --- SEITENLEISTE ---
-st.sidebar.header("Configuration")
-orientierung = st.sidebar.radio("Component position:", ("Horizontal (Lying)", "Vertical (Standing)"))
-kanten_sens = st.sidebar.slider("edge sensitivity", 0.01, 0.50, 0.14, 0.01)
-ref_weiss_mm = st.sidebar.number_input("Reference width inside (mm)", value=60.00)
-#such_offset_px_val = st.sidebar.slider("Search offset (pixels)", 1, 100, 30)
-such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 0.5, 20.0, 5.0, 0.5)
-mm_pro_drehung = st.sidebar.number_input("mm per revolution", value=0.75)
+st.sidebar.header("Konfiguration")
+orientierung = st.sidebar.radio("Bauteil-Lage:", ("Horizontal (Liegend)", "Vertikal (Stehend)"))
+kanten_sens = st.sidebar.slider("Kanten-Sensitivität", 0.01, 0.90, 0.30, 0.05)
+ref_weiss_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00)
+such_offset_mm = st.sidebar.slider("Such-Offset Außen (mm)", 0.5, 20.0, 5.0, 0.5)
+mm_pro_drehung = st.sidebar.number_input("mm pro Schraubendrehung", value=0.75)
 
 # --- BILD-EINGABE ---
-input_method = st.radio("Image source:", ("Use camera", "Screenshot / Upload file"))
-uploaded_file = st.camera_input("Foto") if input_method == "Use camera" else st.file_uploader("Select image", type=["jpg", "jpeg", "png"])
+input_method = st.radio("Bildquelle:", ("Kamera nutzen", "Datei hochladen"))
+uploaded_file = st.camera_input("Foto") if input_method == "Kamera nutzen" else st.file_uploader("Bild auswählen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     # 1. Vorbereitung
     pil_img = ImageOps.exif_transpose(Image.open(uploaded_file))
-    if pil_img.width > 2000:
-        ratio = 2000 / float(pil_img.width)
-        pil_img = pil_img.resize((2000, int(pil_img.height * ratio)), Image.Resampling.LANCZOS)
+    if pil_img.width > 1500:
+        ratio = 1500 / float(pil_img.width)
+        pil_img = pil_img.resize((1500, int(pil_img.height * ratio)), Image.Resampling.LANCZOS)
     
     img_rgb = np.array(pil_img.convert('RGB'))
-    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Lying)" else img_rgb
+    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Liegend)" else img_rgb
+    h_img, w_img = img_rot.shape[:2]
 
-    # 2. Analyse
-    gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
-    gray_smooth = convolve2d(gray, np.ones((3, 3))/25.0, mode='same')
-    h_grad = np.abs(np.diff(gray_smooth, axis=1))
-    kanten_profil = np.mean(h_grad, axis=0)
-    kanten_profil = kanten_profil / np.max(kanten_profil)
+    # 2. Analyse (Gradientenbild erstellen)
+    gray = cv2.cvtColor(img_rot, cv2.COLOR_RGB2GRAY).astype(np.float64)
+    # Kleinerer Kernel für schärfere Peaks
+    gray_smooth = cv2.GaussianBlur(gray, (5, 5), 0)
+    h_grad = np.abs(cv2.Sobel(gray_smooth, cv2.CV_64F, 1, 0, ksize=3))
 
-    # 3. Kanten finden (Mitte -> Außen)
-    img_center = kanten_profil.shape[0] // 2
-    # Innenkanten (Grün)
-    suche_r = np.where(kanten_profil[img_center:] > kanten_sens)[0]
-    x_rechts_w_px = (img_center + suche_r[0]) if len(suche_r) > 0 else img_center
-    suche_l = np.where(kanten_profil[:img_center][::-1] > kanten_sens)[0]
-    x_links_w_px = (img_center - suche_l[0]) if len(suche_l) > 0 else img_center
+    # Zeilen für die Analyse auswählen (z.B. 30 Zeilen über die Höhe verteilt)
+    sample_rows = np.linspace(h_img*0.1, h_img*0.9, 30, dtype=int)
+    img_center_x = w_img // 2
 
-    if x_rechts_w_px > x_links_w_px:
-        px_pro_mm = (x_rechts_w_px - x_links_w_px) / ref_weiss_mm
+    # 3. Kanten finden per Regression
+    # Innen Rechts (Suche von Mitte nach rechts)
+    line_ir = get_edge_line(h_grad, sample_rows, img_center_x, w_img, kanten_sens)
+    # Innen Links (Suche von Mitte nach links)
+    line_il = get_edge_line(h_grad, sample_rows, 0, img_center_x, kanten_sens)
 
-        such_offset_px_val = int(such_offset_mm * px_pro_mm)
-        # Außenkanten (Gelb)
-        start_r_a = min(len(kanten_profil)-1, x_rechts_w_px + such_offset_px_val)
-        idx_r_a = np.where(kanten_profil[x_rechts_w_px+5:start_r_a+1][::-1] > kanten_sens)[0]
-        x_rechts_a_px = (start_r_a - idx_r_a[0]) if len(idx_r_a) > 0 else start_r_a
-
-        start_l_a = max(0, x_links_w_px - such_offset_px_val)
-        idx_l_a = np.where(kanten_profil[start_l_a:x_links_w_px-5] > kanten_sens)[0]
-        x_links_a_px = (start_l_a + idx_l_a[0]) if len(idx_l_a) > 0 else start_l_a
-
-        # 4. Berechnung
-        zentrum_ist_px = (x_links_w_px + x_rechts_w_px) / 2.0
-        zentrum_soll_px = (x_links_a_px + x_rechts_a_px) / 2.0
-        abweichung_mm = (zentrum_ist_px - zentrum_soll_px) / px_pro_mm
-        toleranz_mm = berechne_mess_toleranz(px_pro_mm)
-        raw_umdr = abs(abweichung_mm) / mm_pro_drehung
-        umdrehungen = round(raw_umdr * 4) / 4  # Rundet auf 0, 0.25, 0.5, 0.75, 1.0 etc.
+    if line_ir and line_il:
+        # Funktionen zur X-Berechnung: x = m*y + b
+        m_ir, b_ir = line_ir
+        m_il, b_il = line_il
         
-        anweisung = "RIGHT" if abweichung_mm <= 0 else "LEFT"
+        # Breite in der Bildmitte berechnen (y_mid)
+        y_mid = h_img // 2
+        x_ir_mid = m_ir * y_mid + b_ir
+        x_il_mid = m_il * y_mid + b_il
+        
+        px_pro_mm = (x_ir_mid - x_il_mid) / ref_weiss_mm
+        offset_px = such_offset_mm * px_pro_mm
 
-        # --- ERGEBNIS ANZEIGE ---
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Deviation", f"{abs(abweichung_mm):.2f} mm")
-        col2.metric("Tolerance (±)", f"{toleranz_mm:.2f} mm")
-        col3.metric("Correction", f"{umdrehungen} Umdr.")
+        # Außenkanten (basierend auf Innenkanten + Offset)
+        line_ar = get_edge_line(h_grad, sample_rows, x_ir_mid + 5, x_ir_mid + offset_px, kanten_sens)
+        line_al = get_edge_line(h_grad, sample_rows, x_il_mid - offset_px, x_il_mid - 5, kanten_sens)
 
-        if umdrehungen < 0.25:
-            st.info(f"✅ Centered (Deviation < 0.2 mm)")
+        if line_ar and line_al:
+            m_ar, b_ar = line_ar
+            m_al, b_al = line_al
+            
+            # Alle X-Positionen für die Bildmitte berechnen
+            x_ar_mid = m_ar * y_mid + b_ar
+            x_al_mid = m_al * y_mid + b_al
+            
+            # 4. Berechnung der Abweichung (in der Bildmitte)
+            zentrum_ist = (x_il_mid + x_ir_mid) / 2.0
+            zentrum_soll = (x_al_mid + x_ar_mid) / 2.0
+            abweichung_mm = (zentrum_ist - zentrum_soll) / px_pro_mm
+            
+            # Winkel berechnen (nur zur Info)
+            winkel = np.degrees(np.arctan(m_ir))
+            
+            # --- ERGEBNIS ANZEIGE ---
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
+            col2.metric("Toleranz (±)", f"{berechne_mess_toleranz(px_pro_mm):.2f} mm")
+            raw_umdr = abs(abweichung_mm) / mm_pro_drehung
+            umdrehungen = round(raw_umdr * 4) / 4
+            col3.metric("Korrektur", f"{umdrehungen} Umdr.")
+
+            st.write(f"📐 Bauteil-Winkel: {winkel:.1f}°")
+
+            # --- VISUALISIERUNG ---
+            img_marked = img_rot.copy()
+            for (m, b, color) in [(m_al, b_al, (255,255,0)), (m_ar, b_ar, (255,255,0)), 
+                                  (m_il, b_il, (0,255,0)), (m_ir, b_ir, (0,255,0))]:
+                # Zeichne Linie von oben nach unten
+                cv2.line(img_marked, (int(m*0 + b), 0), (int(m*h_img + b), h_img), color, 3)
+
+            # Zentren markieren
+            cv2.line(img_marked, (int(zentrum_soll), 0), (int(zentrum_soll), h_img), (0,0,255), 2)
+            cv2.line(img_marked, (int(zentrum_ist), 0), (int(zentrum_ist), h_img), (255,0,0), 2)
+
+            st.image(img_marked, caption="Analyse mit Regressionsgeraden", use_container_width=True)
         else:
-            st.success(f"⚙️ Turn the Screw **{umdrehungen}** to the **{anweisung}**.")
-
-        # --- VISUALISIERUNG ---
-        img_marked = img_rot.copy()
-        h_img = img_marked.shape[0]
-        for x, c, w in [(x_links_a_px, (255,255,0), 2), (x_rechts_a_px, (255,255,0), 2), 
-                        (x_links_w_px, (0,255,0), 2), (x_rechts_w_px, (0,255,0), 2),
-                        (zentrum_soll_px, (0,0,255), 2), (zentrum_ist_px, (255,0,0), 2)]:
-            cv2.line(img_marked, (int(x), 0), (int(x), h_img), c, w)
-
-        st.subheader("🔍 Detail-Zoom")
-        z_cols = st.columns(2)
-        y_m = h_img // 2
-        def zoom(img, x, y):
-            x1, y1, x2, y2 = max(0,int(x-75)), max(0,int(y-75)), min(img.shape[1],int(x+75)), min(img.shape[0],int(y+75))
-            return cv2.resize(img[y1:y2, x1:x2], (0,0), fx=5, fy=5, interpolation=cv2.INTER_NEAREST)
-        
-        z_cols[0].image(zoom(img_marked, x_links_a_px, y_m), caption="Left Edge")
-        z_cols[1].image(zoom(img_marked, x_rechts_a_px, y_m), caption="Right Edge")
-        
-        st.subheader("Analysis overview")
-        st.image(img_marked, use_container_width=True)
+            st.error("Außenkanten konnten nicht präzise berechnet werden.")
     else:
-
-        st.error("Could not find any edges.")
-
-
-
-
-
-
-
-
+        st.error("Innenkanten nicht gefunden. Bitte Sensitivität anpassen.")
