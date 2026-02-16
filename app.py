@@ -72,18 +72,18 @@ if uploaded_file is not None:
         raw_umdr = abs(abweichung_mm) / mm_pro_drehung
         umdrehungen = round(raw_umdr * 4) / 4  # Rundet auf 0, 0.25, 0.5, 0.75, 1.0 etc.
         
-        anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
+        anweisung = "RIGHT" if abweichung_mm <= 0 else "LEFT"
 
         # --- ERGEBNIS ANZEIGE ---
         col1, col2, col3 = st.columns(3)
-        col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
-        col2.metric("Toleranz (±)", f"{toleranz_mm:.2f} mm")
-        col3.metric("Korrektur", f"{umdrehungen} Umdr.")
+        col1.metric("Deviation", f"{abs(abweichung_mm):.2f} mm")
+        col2.metric("Tolerance (±)", f"{toleranz_mm:.2f} mm")
+        col3.metric("Correction", f"{umdrehungen} Umdr.")
 
         if umdrehungen < 0.25:
-            st.info(f"✅ Zentriert (Korrektur < 1/4 Umdrehung)")
+            st.info(f"✅ Centered (Deviation < 0.2 mm)")
         else:
-            st.success(f"⚙️ Drehe die Schraube **{anweisung}**.")
+            st.success(f"⚙️ Turn the Screw to the **{anweisung}**.")
 
         # --- VISUALISIERUNG ---
         img_marked = img_rot.copy()
@@ -100,13 +100,14 @@ if uploaded_file is not None:
             x1, y1, x2, y2 = max(0,int(x-50)), max(0,int(y-50)), min(img.shape[1],int(x+50)), min(img.shape[0],int(y+50))
             return cv2.resize(img[y1:y2, x1:x2], (0,0), fx=5, fy=5, interpolation=cv2.INTER_NEAREST)
         
-        z_cols[0].image(zoom(img_marked, x_links_a_px, y_m), caption="Kante Links")
-        z_cols[1].image(zoom(img_marked, x_rechts_a_px, y_m), caption="Kante Rechts")
+        z_cols[0].image(zoom(img_marked, x_links_a_px, y_m), caption="Left Edge")
+        z_cols[1].image(zoom(img_marked, x_rechts_a_px, y_m), caption="Right Edge")
         
-        st.subheader("Analyse-Übersicht")
+        st.subheader("Analysis overview")
         st.image(img_marked, use_container_width=True)
     else:
 
-        st.error("Konnte keine Kanten finden.")
+        st.error("Could not find any edges.")
+
 
 
