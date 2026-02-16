@@ -88,9 +88,9 @@ if uploaded_file is not None:
         # --- VISUALISIERUNG ---
         img_marked = img_rot.copy()
         h_img = img_marked.shape[0]
-        for x, c, w in [(x_links_a_px, (255,255,0), 8), (x_rechts_a_px, (255,255,0), 8), 
-                        (x_links_w_px, (0,255,0), 8), (x_rechts_w_px, (0,255,0), 8),
-                        (zentrum_soll_px, (0,0,255), 4), (zentrum_ist_px, (255,0,0), 4)]:
+        for x, c, w in [(x_links_a_px, (255,255,0), 2), (x_rechts_a_px, (255,255,0), 2), 
+                        (x_links_w_px, (0,255,0), 2), (x_rechts_w_px, (0,255,0), 2),
+                        (zentrum_soll_px, (0,0,255), 2), (zentrum_ist_px, (255,0,0), 2)]:
             cv2.line(img_marked, (int(x), 0), (int(x), h_img), c, w)
 
         st.subheader("🔍 Detail-Zoom")
@@ -108,6 +108,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
