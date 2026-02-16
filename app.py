@@ -16,16 +16,16 @@ st.set_page_config(page_title="Präzisions-Analyse Pro", layout="centered")
 st.title("🛠 Profil-Mess-App Pro")
 
 # --- SEITENLEISTE ---
-st.sidebar.header("Einstellungen")
-orientierung = st.sidebar.radio("Bauteil-Lage:", ("Horizontal (Liegend)", "Vertikal (Stehend)"))
-kanten_sens = st.sidebar.slider("Kanten-Sensibilität", 0.01, 0.50, 0.14, 0.01)
-ref_weiss_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00)
-such_offset_px_val = st.sidebar.slider("Such-Versatz (Pixel)", 1, 100, 30)
-mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
+st.sidebar.header("Configuration")
+orientierung = st.sidebar.radio("Component position:", ("Horizontal (Lying)", "Vertical (Standing)"))
+kanten_sens = st.sidebar.slider("edge sensitivity", 0.01, 0.50, 0.14, 0.01)
+ref_weiss_mm = st.sidebar.number_input("Reference width inside (mm)", value=60.00)
+such_offset_px_val = st.sidebar.slider("Search offset (pixels)", 1, 100, 30)
+mm_pro_drehung = st.sidebar.number_input("mm per revolution", value=0.75)
 
 # --- BILD-EINGABE ---
-input_method = st.radio("Bildquelle:", ("Kamera nutzen", "Screenshot / Datei hochladen"))
-uploaded_file = st.camera_input("Foto") if input_method == "Kamera nutzen" else st.file_uploader("Bild auswählen", type=["jpg", "jpeg", "png"])
+input_method = st.radio("Image source:", ("Use camera", "Screenshot / Upload file"))
+uploaded_file = st.camera_input("Foto") if input_method == "Use camera" else st.file_uploader("Select image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     # 1. Vorbereitung
@@ -106,3 +106,4 @@ if uploaded_file is not None:
     else:
 
         st.error("Konnte keine Kanten finden.")
+
