@@ -107,9 +107,51 @@ if uploaded_file is not None:
         
         st.subheader("Analysis overview")
         st.image(img_marked, use_container_width=True)
+        # --- GRADIENTEN-DIAGRAMM ---
+        st.divider()
+        st.subheader("📊 Signal-Analyse: Kanten-Profil")
+        st.write("Dieses Diagramm zeigt die Kontraststärke (Gradient) über die Bildbreite. Die Spitzen (Peaks) sind deine Kanten.")
+        
+        # Erstellung des Plots
+        fig, ax = plt.subplots(figsize=(10, 4))
+        
+        # Hintergrund und Stil an Streamlit anpassen
+        fig.patch.set_facecolor('#0E1117') 
+        ax.set_facecolor('#1e2129')
+        
+        # Den Gradienten (das Kantenprofil) plotten
+        ax.plot(kanten_profil, color='#00d1ff', linewidth=1.5, label='Kontrast-Stärke')
+        ax.fill_between(range(len(kanten_profil)), kanten_profil, color='#00d1ff', alpha=0.1)
+        
+        # Die Sensitivitäts-Schwelle einzeichnen
+        ax.axhline(y=kanten_sens, color='red', linestyle=':', label='Schwellenwert (Sens)')
+        
+        # Vertikale Linien für die gefundenen Kantenpositionen
+        ax.axvline(x=x_links_w_px, color='lime', linestyle='--', alpha=0.8, label='Innen-Kanten')
+        ax.axvline(x=x_rechts_w_px, color='lime', linestyle='--', alpha=0.8)
+        
+        ax.axvline(x=x_links_a_px, color='yellow', linestyle='--', alpha=0.8, label='Außen-Kanten')
+        ax.axvline(x=x_rechts_a_px, color='yellow', linestyle='--', alpha=0.8)
+
+        # Achsen-Beschriftung
+        ax.set_xlim(0, len(kanten_profil))
+        ax.set_ylim(0, 1.1)
+        ax.set_xlabel("Pixel-Position (X)", color='white')
+        ax.set_ylabel("Relative Stärke", color='white')
+        ax.tick_params(colors='white')
+        
+        # Legende anzeigen
+        ax.legend(loc='upper right', facecolor='#0E1117', labelcolor='white', fontsize='small')
+        
+        # Plot in Streamlit ausgeben
+        st.pyplot(fig)
+
+
+    
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
