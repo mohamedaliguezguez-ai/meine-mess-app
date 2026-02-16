@@ -97,7 +97,7 @@ if uploaded_file is not None:
         z_cols = st.columns(2)
         y_m = h_img // 2
         def zoom(img, x, y):
-            x1, y1, x2, y2 = max(0,int(x-50)), max(0,int(y-50)), min(img.shape[1],int(x+50)), min(img.shape[0],int(y+50))
+            x1, y1, x2, y2 = max(0,int(x-75)), max(0,int(y-75)), min(img.shape[1],int(x+75)), min(img.shape[0],int(y+75))
             return cv2.resize(img[y1:y2, x1:x2], (0,0), fx=5, fy=5, interpolation=cv2.INTER_NEAREST)
         
         z_cols[0].image(zoom(img_marked, x_links_a_px, y_m), caption="Left Edge")
@@ -108,6 +108,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
