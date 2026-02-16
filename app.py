@@ -35,7 +35,7 @@ if uploaded_file is not None:
         pil_img = pil_img.resize((2000, int(pil_img.height * ratio)), Image.Resampling.LANCZOS)
     
     img_rgb = np.array(pil_img.convert('RGB'))
-    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Liegend)" else img_rgb
+    img_rot = cv2.rotate(img_rgb, cv2.ROTATE_90_CLOCKWISE) if orientierung == "Horizontal (Lying)" else img_rgb
 
     # 2. Analyse
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
@@ -69,17 +69,19 @@ if uploaded_file is not None:
         zentrum_soll_px = (x_links_a_px + x_rechts_a_px) / 2.0
         abweichung_mm = (zentrum_ist_px - zentrum_soll_px) / px_pro_mm
         toleranz_mm = berechne_mess_toleranz(px_pro_mm)
-        umdrehungen = abs(abweichung_mm) / mm_pro_drehung
+        raw_umdr = abs(abweichung_mm) / mm_pro_drehung
+        umdrehungen = round(raw_umdr * 4) / 4  # Rundet auf 0, 0.25, 0.5, 0.75, 1.0 etc.
+        
         anweisung = "RECHTS herum" if abweichung_mm <= 0 else "LINKS herum"
 
         # --- ERGEBNIS ANZEIGE ---
         col1, col2, col3 = st.columns(3)
         col1.metric("Abweichung", f"{abs(abweichung_mm):.2f} mm")
         col2.metric("Toleranz (±)", f"{toleranz_mm:.2f} mm")
-        col3.metric("Korrektur", f"{umdrehungen:.2f} Umdr.")
+        col3.metric("Korrektur", f"{umdrehungen} Umdr.")
 
-        if abs(abweichung_mm) <= toleranz_mm:
-            st.info(f"✅ Zentriert (innerhalb Toleranz: {toleranz_mm:.2f} mm)")
+        if umdrehungen < 0.25:
+            st.info(f"✅ Zentriert (Korrektur < 1/4 Umdrehung)")
         else:
             st.success(f"⚙️ Drehe die Schraube **{anweisung}**.")
 
@@ -106,4 +108,5 @@ if uploaded_file is not None:
     else:
 
         st.error("Konnte keine Kanten finden.")
+
 
