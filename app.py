@@ -14,51 +14,68 @@ def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
 
 def get_side_analysis(img_rgb, side, kanten_sens):
     """
-    Findet den optimalen Winkel für eine spezifische Seite (links oder rechts)
-    und gibt Distanz, Winkel, markiertes Bild, Profil und Peaks zurück.
+    Optimierte Analyse mit Vision-Enhancement:
+    - CLAHE für lokalen Kontrast
+    - Bilateraler Filter für scharfe Kanten ohne Rauschen
     """
     h, w = img_rgb.shape[:2]
     center = (w // 2, h // 2)
     
-    # Fokus-Bereich definieren (ca. 40% der jeweiligen Seite)
+    # Fokus-Bereich definieren
     if side == "left":
         x_min, x_max = 0, int(w * 0.45)
     else:
         x_min, x_max = int(w * 0.55), w
 
+    # Initiales Graustufenbild für die Vorverarbeitung
+    gray_full = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    
+    # 1. Vision Enhancement: CLAHE (Kontrast-Boosting)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
+    gray_enhanced = clahe.apply(gray_full)
+
     def evaluate_angle(angle):
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        gray = cv2.cvtColor(rotated, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        grad = np.abs(np.diff(gray, axis=1))
-        # Wir maximieren den höchsten Peak im gewählten Bereich
+        # Wir nutzen das kontrastverstärkte Bild für die Winkelsuche
+        rotated = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        
+        # 2. Vision Enhancement: Bilateraler Filter (Rauschen weg, Kante bleibt scharf)
+        # d=9, sigmaColor=75, sigmaSpace=75
+        smooth = cv2.bilateralFilter(rotated, 9, 75, 75)
+        
+        grad = np.abs(np.diff(smooth.astype(np.float32), axis=1))
+        # Maximierung des Signal-Peaks im Bereich
         return np.max(np.mean(grad, axis=0)[x_min:x_max])
 
-    # 1. Iterative Suche (Grob-Suche 0.5° Schritte, Fein-Suche 0.1° Schritte)
+    # --- Iterative Suche ---
     angles_coarse = np.arange(-5, 5.5, 0.5)
     best_a_c = angles_coarse[np.argmax([evaluate_angle(a) for a in angles_coarse])]
     
     angles_fine = np.arange(best_a_c - 0.5, best_a_c + 0.6, 0.1)
     best_angle = angles_fine[np.argmax([evaluate_angle(a) for a in angles_fine])]
 
-    # 2. Finales Bild für diese Seite erstellen
+    # --- Finales Bild für diese Seite erstellen ---
     M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    opt_img = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    # Rotation auf das Originalbild für die Anzeige
+    opt_img_rgb = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     
-    # Kanten im Profil finden
-    gray_opt = cv2.cvtColor(opt_img, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    grad_opt = np.abs(np.diff(gray_opt, axis=1))
+    # Rotation auf das verbesserte Graubild für die Messung
+    opt_gray = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    opt_smooth = cv2.bilateralFilter(opt_gray, 9, 75, 75)
+    
+    grad_opt = np.abs(np.diff(opt_smooth.astype(np.float32), axis=1))
     profil = np.mean(grad_opt, axis=0)
     
-    # Normalisierung für das Diagramm
+    # Normalisierung
     max_p = np.max(profil) if np.max(profil) > 0 else 1
     profil_norm = profil / max_p
     
-    # Peaks finden, die über der Schwelle liegen
+    # --- Dynamische Peak-Suche ---
+    # Wir suchen Peaks, die signifikant über der vom User gewählten Schwelle liegen
     area_peaks = np.where(profil_norm[x_min:x_max] > kanten_sens)[0]
     
     dist_px = 0
-    img_marked = opt_img.copy()
+    img_marked = opt_img_rgb.copy()
     peaks_rel = []
     
     if len(area_peaks) >= 2:
@@ -72,9 +89,9 @@ def get_side_analysis(img_rgb, side, kanten_sens):
         
         # Linien zeichnen (Gelb=Außen, Grün=Innen)
         if side == "left":
-            c_gelb, c_gruen = p1_abs, p2_abs  # Links: Außen ist weiter links
+            c_gelb, c_gruen = p1_abs, p2_abs
         else:
-            c_gruen, c_gelb = p1_abs, p2_abs  # Rechts: Außen ist weiter rechts
+            c_gruen, c_gelb = p1_abs, p2_abs
             
         cv2.line(img_marked, (int(c_gelb), 0), (int(c_gelb), h), (255, 255, 0), 6) 
         cv2.line(img_marked, (int(c_gruen), 0), (int(c_gruen), h), (0, 255, 0), 6) 
@@ -82,14 +99,16 @@ def get_side_analysis(img_rgb, side, kanten_sens):
     return dist_px, best_angle, img_marked, profil_norm[x_min:x_max], peaks_rel
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="Dual-Optimization Pro", layout="wide")
-st.title("🛠 Profil-Mess-App: Duale Seiten-Optimierung")
+st.set_page_config(page_title="Dual-Optimization Vision Pro", layout="wide")
+st.title("🛠 Profil-Mess-App: Enhanced Dual-Optimization")
 
 # --- SEITENLEISTE ---
 st.sidebar.header("⚙️ Konfiguration")
 ref_weiss_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00, step=0.01)
 kanten_sens = st.sidebar.slider("Kanten-Sensitivität (Schwelle)", 0.01, 0.50, 0.14)
 mm_pro_drehung = st.sidebar.number_input("mm pro Schraubendrehung", value=0.75, step=0.05)
+
+st.sidebar.info("💡 **Tipp:** Wenn die Kanten schwer erkennbar sind, nutzen wir nun automatisch CLAHE-Kontrast und bilaterale Filterung.")
 
 # --- BILD-EINGABE ---
 uploaded_file = st.file_uploader("Bild hochladen (JPEG/PNG)", type=["jpg", "jpeg", "png"])
@@ -104,13 +123,16 @@ if uploaded_file is not None:
     img_raw = np.array(pil_img.convert('RGB'))
     h, w = img_raw.shape[:2]
 
-    # 1. Globale Skalierung (Initial-Scan in der Mitte)
-    with st.spinner("Kalibrierung läuft..."):
+    # 1. Globale Skalierung (Initial-Scan in der Mitte) mit Vorverarbeitung
+    with st.spinner("Initialisiere Kalibrierung & Vision Enhancement..."):
         gray_init = cv2.cvtColor(img_raw, cv2.COLOR_RGB2GRAY)
-        sample = np.mean(np.abs(np.diff(gray_init[h//2-50:h//2+50, :], axis=1)), axis=0)
+        clahe_init = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(gray_init)
+        smooth_init = cv2.bilateralFilter(clahe_init, 9, 75, 75)
+        
+        sample = np.mean(np.abs(np.diff(smooth_init[h//2-50:h//2+50, :].astype(np.float32), axis=1)), axis=0)
         sample_norm = sample / (np.max(sample) if np.max(sample) > 0 else 1)
         p_init = np.where(sample_norm > 0.4)[0]
-        # Berechnung der px/mm anhand der inneren Kanten im ungedrehten Bild
+        
         px_pro_mm = (p_init[-1] - p_init[0]) / ref_weiss_mm if len(p_init) > 1 else 1.0
 
     # --- DUAL-SPALTEN ANALYSE ---
@@ -118,61 +140,59 @@ if uploaded_file is not None:
     
     # LINKER BEREICH
     with col_l:
-        st.subheader("⬅️ Linke Seite (Optimiert)")
+        st.subheader("⬅️ Linke Seite (Vision Enhanced)")
         with st.spinner("Optimiere Winkel Links..."):
             dist_l_px, ang_l, img_l, prof_l, peaks_l = get_side_analysis(img_raw, "left", kanten_sens)
             dist_l_mm = dist_l_px / px_pro_mm
             
             st.metric("Abstand L (Gelb-Grün)", f"{dist_l_mm:.3f} mm", f"{ang_l:.1f}° Neigung")
-            st.image(img_l, caption="Markierte Kanten Links", use_container_width=True)
+            st.image(img_l, caption="Gefilterte Kanten Links", use_container_width=True)
             
-            # Diagramm Links
             fig_l, ax_l = plt.subplots(figsize=(10, 3))
             fig_l.patch.set_facecolor('#0E1117')
             ax_l.set_facecolor('#1e2129')
-            ax_l.plot(prof_l, color='cyan', label='Signal')
+            ax_l.plot(prof_l, color='cyan', label='Optimiertes Signal')
             ax_l.axhline(kanten_sens, color='red', linestyle='--', label='Schwelle')
             if len(peaks_l) >= 2:
-                ax_l.axvline(peaks_l[0], color='yellow', label='Außen')
-                ax_l.axvline(peaks_l[-1], color='green', label='Innen')
+                ax_l.axvline(peaks_l[0], color='yellow', label='Außen (Peak)')
+                ax_l.axvline(peaks_l[-1], color='green', label='Innen (Peak)')
             ax_l.tick_params(colors='white')
             ax_l.legend()
             st.pyplot(fig_l)
 
     # RECHTER BEREICH
     with col_r:
-        st.subheader("➡️ Rechte Seite (Optimiert)")
+        st.subheader("➡️ Rechte Seite (Vision Enhanced)")
         with st.spinner("Optimiere Winkel Rechts..."):
             dist_r_px, ang_r, img_r, prof_r, peaks_r = get_side_analysis(img_raw, "right", kanten_sens)
             dist_r_mm = dist_r_px / px_pro_mm
             
             st.metric("Abstand R (Grün-Gelb)", f"{dist_r_mm:.3f} mm", f"{ang_r:.1f}° Neigung")
-            st.image(img_r, caption="Markierte Kanten Rechts", use_container_width=True)
+            st.image(img_r, caption="Gefilterte Kanten Rechts", use_container_width=True)
             
-            # Diagramm Rechts
             fig_r, ax_r = plt.subplots(figsize=(10, 3))
             fig_r.patch.set_facecolor('#0E1117')
             ax_r.set_facecolor('#1e2129')
-            ax_r.plot(prof_r, color='cyan', label='Signal')
+            ax_r.plot(prof_r, color='cyan', label='Optimiertes Signal')
             ax_r.axhline(kanten_sens, color='red', linestyle='--', label='Schwelle')
             if len(peaks_r) >= 2:
-                ax_r.axvline(peaks_r[0], color='green', label='Innen')
-                ax_r.axvline(peaks_r[-1], color='yellow', label='Außen')
+                ax_r.axvline(peaks_r[0], color='green', label='Innen (Peak)')
+                ax_r.axvline(peaks_r[-1], color='yellow', label='Außen (Peak)')
             ax_r.tick_params(colors='white')
             ax_r.legend()
             st.pyplot(fig_r)
 
-    # --- FINALERGEBNIS & ANWEISUNG ---
+    # --- FINALERGEBNIS ---
     st.divider()
     diff_mm = dist_l_mm - dist_r_mm
-    korrektur_mm = diff_mm / 2.0  # Zentrierungslogik
+    korrektur_mm = diff_mm / 2.0
     umdrehungen = round((abs(korrektur_mm) / mm_pro_drehung) * 4) / 4
     richtung = "RECHTS" if korrektur_mm > 0 else "LINKS"
 
     res_col1, res_col2 = st.columns(2)
     with res_col1:
         st.header("📋 Korrektur-Ergebnis")
-        st.write(f"Differenz zwischen den Seiten: **{abs(diff_mm):.3f} mm**")
+        st.write(f"Differenz L/R: **{abs(diff_mm):.3f} mm**")
         if umdrehungen < 0.25:
             st.success("✅ **ZENTRIERT:** Keine Korrektur erforderlich.")
         else:
@@ -181,11 +201,11 @@ if uploaded_file is not None:
     
     with res_col2:
         st.info(f"""
-        **Mess-Details:**
-        - Pixel/mm: {px_pro_mm:.2f}
-        - Toleranz (±): {berechne_mess_toleranz(px_pro_mm):.3f} mm
-        - Optimierungs-Verfahren: Dual-Iterative Peak Search
+        **Spezielle Vision-Technik aktiv:**
+        1. **CLAHE:** Verstärkt den Kanten-Kontrast lokal.
+        2. **Bilateral Filter:** Glättet Flächen ohne die Kanten zu 'verschmieren'.
+        3. **Iterative Peak-Search:** Findet den Winkel mit dem steilsten Gradienten.
         """)
 
 else:
-    st.info("Bitte laden Sie ein Foto hoch, um die Analyse zu starten.")
+    st.info("Bitte laden Sie ein Foto hoch. Die neue Vision-Optimierung wird automatisch angewendet.")
