@@ -19,7 +19,7 @@ st.title("🛠 Profil-Mess-App Pro")
 st.sidebar.header("Einstellungen")
 orientierung = st.sidebar.radio("Bauteil-Lage:", ("Horizontal (Liegend)", "Vertikal (Stehend)"))
 kanten_sens = st.sidebar.slider("Kanten-Sensibilität", 0.01, 0.50, 0.14, 0.01)
-ref_weiss_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=90.00)
+ref_weiss_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00)
 such_offset_px_val = st.sidebar.slider("Such-Versatz (Pixel)", 1, 100, 30)
 mm_pro_drehung = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
 
@@ -104,4 +104,5 @@ if uploaded_file is not None:
         st.subheader("Analyse-Übersicht")
         st.image(img_marked, use_container_width=True)
     else:
+
         st.error("Konnte keine Kanten finden.")
