@@ -20,7 +20,8 @@ st.sidebar.header("Configuration")
 orientierung = st.sidebar.radio("Component position:", ("Horizontal (Lying)", "Vertical (Standing)"))
 kanten_sens = st.sidebar.slider("edge sensitivity", 0.01, 0.50, 0.14, 0.01)
 ref_weiss_mm = st.sidebar.number_input("Reference width inside (mm)", value=60.00)
-such_offset_px_val = st.sidebar.slider("Search offset (pixels)", 1, 100, 30)
+#such_offset_px_val = st.sidebar.slider("Search offset (pixels)", 1, 100, 30)
+such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 0.5, 20.0, 5.0, 0.5)
 mm_pro_drehung = st.sidebar.number_input("mm per revolution", value=0.75)
 
 # --- BILD-EINGABE ---
@@ -54,7 +55,8 @@ if uploaded_file is not None:
 
     if x_rechts_w_px > x_links_w_px:
         px_pro_mm = (x_rechts_w_px - x_links_w_px) / ref_weiss_mm
-        
+
+        such_offset_px_val = int(such_offset_mm * px_pro_mm)
         # Außenkanten (Gelb)
         start_r_a = min(len(kanten_profil)-1, x_rechts_w_px + such_offset_px_val)
         idx_r_a = np.where(kanten_profil[x_rechts_w_px+5:start_r_a+1][::-1] > kanten_sens)[0]
@@ -108,6 +110,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
