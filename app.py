@@ -12,20 +12,34 @@ def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
     return 0.0
     
 def auto_begradigen(img_rgb):
-    """Richtet das Bild automatisch horizontal aus."""
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    """Richtet das Bild aus und ignoriert dabei den äußeren Rand."""
+    h, w = img_rgb.shape[:2]
+    
+    # 1. Wir erstellen eine Kopie nur für die Analyse und schneiden 5% vom Rand weg
+    # Damit der Bildrahmen nicht als Kontur erkannt wird.
+    margin_h = int(h * 0.05)
+    margin_w = int(w * 0.05)
+    analyse_zone = img_rgb[margin_h:h-margin_h, margin_w:w-margin_w]
+    
+    gray = cv2.cvtColor(analyse_zone, cv2.COLOR_RGB2GRAY)
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
+    
+    # Kanten finden (Canny ist hier meist besser als Threshold)
+    edged = cv2.Canny(blur, 50, 150)
+    
+    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
         return img_rgb, 0.0
     
+    # Die größte Kontur im inneren Bereich suchen
     c = max(contours, key=cv2.contourArea)
+    
+    # Winkel des umschließenden Rechtecks berechnen
     rect = cv2.minAreaRect(c)
     angle = rect[-1]
     
-    # Korrektur des Winkels für OpenCV 4.5+
+    # OpenCV Winkel-Logik korrigieren
     if angle < -45:
         angle = -(90 + angle)
     elif angle > 45:
@@ -33,10 +47,11 @@ def auto_begradigen(img_rgb):
     else:
         angle = -angle
         
-    (h, w) = img_rgb.shape[:2]
+    # 2. Die Rotation auf das ORIGINALE (volle) Bild anwenden
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
     rotated = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    
     return rotated, angle
     
 # --- APP KONFIGURATION ---
@@ -53,6 +68,8 @@ ref_weiss_mm = st.sidebar.number_input("Reference width inside (mm)", value=60.0
 such_offset_mm = st.sidebar.slider("Such-Offset (mm)", 0.5, 20.0, 5.0, 0.5)
 mm_pro_drehung = st.sidebar.number_input("mm per revolution", value=0.75)
 do_auto_level = st.sidebar.checkbox("Bilder automatisch begradigen", value=True)
+st.sidebar.markdown("---")
+manual_angle = st.sidebar.slider("Manuelle Fein-Drehung (°)", -5.0, 5.0, 0.0, 0.05)
 
 # --- BILD-EINGABE ---
 input_method = st.radio("Image source:", ("Use camera", "Screenshot / Upload file"))
@@ -72,6 +89,13 @@ if uploaded_file is not None:
     if do_auto_level:
         img_rot, gefundener_winkel = auto_begradigen(img_rot)
         st.sidebar.info(f"Korrektur-Winkel: {gefundener_winkel:.2f}°")
+   # Dann die manuelle Fein-Justierung oben drauf
+    if manual_angle != 0:
+        (h, w) = img_rot.shape[:2]
+        M_manual = cv2.getRotationMatrix2D((w // 2, h // 2), manual_angle, 1.0)
+        img_rot = cv2.warpAffine(img_rot, M_manual, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    
+    st.sidebar.caption(f"Korrektur Gesamt: {auto_angle + manual_angle:.2f}°")     
 
     # 2. Analyse
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
@@ -207,6 +231,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
