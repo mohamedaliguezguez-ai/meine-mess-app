@@ -40,7 +40,7 @@ if uploaded_file is not None:
 
     # 2. Analyse
     gray = (0.2989 * img_rot[:,:,0] + 0.5870 * img_rot[:,:,1] + 0.1140 * img_rot[:,:,2]).astype(np.float64)
-    gray_smooth = convolve2d(gray, np.ones((5, 5))/25.0, mode='same')
+    gray_smooth = convolve2d(gray, np.ones((3, 3))/25.0, mode='same')
     h_grad = np.abs(np.diff(gray_smooth, axis=1))
     kanten_profil = np.mean(h_grad, axis=0)
     kanten_profil = kanten_profil / np.max(kanten_profil)
@@ -110,6 +110,7 @@ if uploaded_file is not None:
     else:
 
         st.error("Could not find any edges.")
+
 
 
 
