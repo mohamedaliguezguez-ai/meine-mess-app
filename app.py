@@ -62,11 +62,11 @@ def get_side_analysis(img_rgb, side, kanten_sens, peak_dist):
         peaks_rel = top_2.tolist()
         
         if side == "left":
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 6) # Außen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 6)   # Innen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 1) # Außen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 1)   # Innen
         else:
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 6)   # Innen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 6) # Außen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 1)   # Innen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 1) # Außen
     
     return dist_px, best_angle, img_marked, profil_norm[x_min:x_max], peaks_rel
 
@@ -110,8 +110,8 @@ if uploaded_file:
             # Anzeige der Kalibrierung
             st.subheader("📏 Kalibrierungs-Check (Innere Kanten)")
             img_calib = img_raw.copy()
-            cv2.line(img_calib, (int(p_init[0]), 0), (int(p_init[0]), h), (255, 0, 0), 12) 
-            cv2.line(img_calib, (int(p_init[-1]), 0), (int(p_init[-1]), h), (255, 0, 0), 12) 
+            cv2.line(img_calib, (int(p_init[0]), 0), (int(p_init[0]), h), (255, 0, 0), 2) 
+            cv2.line(img_calib, (int(p_init[-1]), 0), (int(p_init[-1]), h), (255, 0, 0), 2) 
             st.image(img_calib, caption=f"Referenz-Check: {pixel_abstand}px = {ref_mm}mm (Blau markiert)", use_container_width=True)
             st.info(f"Maßstab ermittelt: **{px_pro_mm:.2f} px/mm**")
         else:
@@ -165,3 +165,4 @@ if uploaded_file:
     
     with res_c2:
         st.info(f"Differenz: {abs(diff):.3f} mm\n\nPräzision: {berechne_mess_toleranz(px_pro_mm):.3f} mm")
+
