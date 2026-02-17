@@ -71,11 +71,11 @@ def get_side_analysis(img_rgb, side, kanten_sens, peak_dist):
         
         # Zeichnen: Links (Gelb-Grün), Rechts (Grün-Gelb)
         if side == "left":
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 6) # Außen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 6)   # Innen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 2) # Außen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 2)   # Innen
         else:
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 6)   # Innen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 6) # Außen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 2)   # Innen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 2) # Außen
     
     return dist_px, best_angle, img_marked, profil_norm[x_min:x_max], peaks_rel
 
@@ -135,3 +135,4 @@ if uploaded_file:
     diff = dist_l_mm - dist_r_mm
     umdr = round((abs(diff/2)/mm_umdr)*4)/4
     st.header(f"Ergebnis: {umdr} Umdrehungen nach {'RECHTS' if diff/2 > 0 else 'LINKS'}")
+
