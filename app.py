@@ -62,11 +62,11 @@ def get_side_analysis(img_rgb, side, kanten_sens, peak_dist):
         peaks_rel = top_2.tolist()
         
         if side == "left":
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 1) # Außen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 1)   # Innen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 2) # Außen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 2)   # Innen
         else:
-            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 1)   # Innen
-            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 1) # Außen
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 2)   # Innen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 2) # Außen
     
     return dist_px, best_angle, img_marked, profil_norm[x_min:x_max], peaks_rel
 
@@ -165,4 +165,5 @@ if uploaded_file:
     
     with res_c2:
         st.info(f"Differenz: {abs(diff):.3f} mm\n\nPräzision: {berechne_mess_toleranz(px_pro_mm):.3f} mm")
+
 
