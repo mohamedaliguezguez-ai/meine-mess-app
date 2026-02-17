@@ -8,153 +8,130 @@ from scipy.signal import find_peaks
 # --- HILFSFUNKTIONEN ---
 
 def berechne_mess_toleranz(px_pro_mm, unsicherheit_px=1.5):
-    """Berechnet die physikalische Toleranz der Messung in mm."""
     if px_pro_mm > 0:
         return unsicherheit_px / px_pro_mm
     return 0.0
 
 def get_side_analysis(img_rgb, side, kanten_sens, peak_dist):
-    """
-    Analysiert eine Seite unabhängig:
-    1. Kontrast-Boosting (CLAHE) & Rauschfilter (Bilateral).
-    2. Iterative Winkelsuche für maximale Peak-Schärfe.
-    3. Robuste Peak-Detektion der zwei signifikantesten Kanten.
-    """
     h, w = img_rgb.shape[:2]
     center = (w // 2, h // 2)
     
-    # Fokus-Bereich (jeweils 50% der Seite für maximale Abdeckung)
+    # Suchbereich festlegen
     if side == "left":
         x_min, x_max = 0, int(w * 0.50)
     else:
         x_min, x_max = int(w * 0.50), w
 
-    # Vorverarbeitung
-    gray_full = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
-    gray_enhanced = clahe.apply(gray_full)
+    # Bildverbesserung
+    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    gray_enhanced = cv2.createCLAHE(clipLimit=2.5).apply(gray)
 
     def evaluate_angle(angle):
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        rotated = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_LINEAR)
         smooth = cv2.bilateralFilter(rotated, 9, 75, 75)
         grad = np.abs(np.diff(smooth.astype(np.float32), axis=1))
         return np.max(np.mean(grad, axis=0)[x_min:x_max])
 
-    # Iterative Suche
-    angles_coarse = np.arange(-5, 5.5, 0.5)
-    best_a_c = angles_coarse[np.argmax([evaluate_angle(a) for a in angles_coarse])]
-    angles_fine = np.arange(best_a_c - 0.5, best_a_c + 0.6, 0.1)
-    best_angle = angles_fine[np.argmax([evaluate_angle(a) for a in angles_fine])]
+    # Winkelsuche
+    angles = np.arange(-5, 5.5, 0.5)
+    best_a = angles[np.argmax([evaluate_angle(a) for a in angles])]
+    fine_angles = np.arange(best_a - 0.5, best_a + 0.6, 0.1)
+    best_angle = fine_angles[np.argmax([evaluate_angle(a) for a in fine_angles])]
 
-    # Finales Bild für diese Seite
+    # Analyse im Bestwinkel
     M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    opt_img_rgb = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    opt_gray = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    opt_img = cv2.warpAffine(img_rgb, M, (w, h), flags=cv2.INTER_CUBIC)
+    opt_gray = cv2.warpAffine(gray_enhanced, M, (w, h), flags=cv2.INTER_CUBIC)
     opt_smooth = cv2.bilateralFilter(opt_gray, 9, 75, 75)
     
-    grad_opt = np.abs(np.diff(opt_smooth.astype(np.float32), axis=1))
-    profil = np.mean(grad_opt, axis=0)
+    grad = np.abs(np.diff(opt_smooth.astype(np.float32), axis=1))
+    profil = np.mean(grad, axis=0)
     profil_norm = profil / (np.max(profil) if np.max(profil) > 0 else 1)
     
-    # Peak-Suche mit Mindest-Abstand (verhindert Doppellinien auf einem Hügel)
+    # --- ROBUSTE PEAK-SUCHE ---
+    # Prominenz auf 0.02 gesenkt, damit auch kleinere Hügel erkannt werden
     peaks, props = find_peaks(
         profil_norm[x_min:x_max], 
         height=kanten_sens, 
         distance=peak_dist, 
-        prominence=0.05
+        prominence=0.02 
     )
     
-    dist_px, img_marked, peaks_rel = 0, opt_img_rgb.copy(), []
+    dist_px, img_marked, peaks_rel = 0, opt_img.copy(), []
     
     if len(peaks) >= 2:
-        # Die zwei stärksten Peaks nach Prominenz wählen
+        # Die zwei Hügel mit der größten Prominenz (Wichtigkeit) nehmen
         best_idx = np.argsort(props["prominences"])[-2:]
-        top_2_peaks = np.sort(peaks[best_idx])
+        top_2 = np.sort(peaks[best_idx])
         
-        p1_abs, p2_abs = x_min + top_2_peaks[0], x_min + top_2_peaks[-1]
+        p1_abs, p2_abs = x_min + top_2[0], x_min + top_2[-1]
         dist_px = abs(p2_abs - p1_abs)
-        peaks_rel = top_2_peaks.tolist()
+        peaks_rel = top_2.tolist()
         
-        # Farblogik: Außen immer Gelb, Innen immer Grün
+        # Zeichnen: Links (Gelb-Grün), Rechts (Grün-Gelb)
         if side == "left":
-            c_gelb, c_gruen = p1_abs, p2_abs
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (255, 255, 0), 6) # Außen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (0, 255, 0), 6)   # Innen
         else:
-            c_gruen, c_gelb = p1_abs, p2_abs
-            
-        cv2.line(img_marked, (int(c_gelb), 0), (int(c_gelb), h), (255, 255, 0), 6) 
-        cv2.line(img_marked, (int(c_gruen), 0), (int(c_gruen), h), (0, 255, 0), 6) 
-        
+            cv2.line(img_marked, (int(p1_abs), 0), (int(p1_abs), h), (0, 255, 0), 6)   # Innen
+            cv2.line(img_marked, (int(p2_abs), 0), (int(p2_abs), h), (255, 255, 0), 6) # Außen
+    
     return dist_px, best_angle, img_marked, profil_norm[x_min:x_max], peaks_rel
 
-# --- APP LAYOUT ---
-st.set_page_config(page_title="Dual-Precision Analyzer", layout="wide")
-st.title("🛠 Profil-Mess-App: Dual-Precision Pro")
+# --- APP ---
+st.set_page_config(page_title="Dual-Precision Pro", layout="wide")
+st.sidebar.header("Konfiguration")
+ref_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00)
+sens = st.sidebar.slider("Kanten-Sensitivität", 0.01, 0.50, 0.09)
+p_dist = st.sidebar.slider("Mindest-Abstand Kanten (px)", 5, 100, 20)
+mm_umdr = st.sidebar.number_input("mm pro Umdrehung", value=0.75)
 
-# --- SEITENLEISTE ---
-st.sidebar.header("⚙️ Konfiguration")
-ref_mm = st.sidebar.number_input("Referenzbreite Innen (mm)", value=60.00, step=0.01)
-kanten_sens = st.sidebar.slider("Kanten-Sensitivität", 0.01, 0.50, 0.09)
-peak_dist = st.sidebar.slider("Mindest-Abstand Kanten (px)", 5, 100, 30)
-mm_umdr = st.sidebar.number_input("mm pro Umdrehung", value=0.75, step=0.05)
-
-# --- BILD-EINGABE ---
-uploaded_file = st.file_uploader("Bild auswählen", type=["jpg", "png", "jpeg"])
+uploaded_file = st.file_uploader("Bild laden", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
     img_raw = np.array(Image.open(uploaded_file).convert('RGB'))
-    h, w = img_raw.shape[:2]
-
+    
     # Kalibrierung
-    with st.spinner("Kalibrierung..."):
+    with st.spinner("Analyse läuft..."):
+        # Dummy-Kalibrierung zur Ermittlung von px_pro_mm
         gray_init = cv2.cvtColor(img_raw, cv2.COLOR_RGB2GRAY)
-        clahe_init = cv2.createCLAHE(clipLimit=2.0).apply(gray_init)
-        smooth_init = cv2.bilateralFilter(clahe_init, 9, 75, 75)
-        sample = np.mean(np.abs(np.diff(smooth_init[h//2-50:h//2+50, :].astype(np.float32), axis=1)), axis=0)
-        p_init, _ = find_peaks(sample/(np.max(sample) if np.max(sample)>0 else 1), height=0.4, distance=100)
+        sample = np.mean(np.abs(np.diff(gray_init, axis=1)), axis=0)
+        p_init, _ = find_peaks(sample/np.max(sample), height=0.4, distance=100)
         px_pro_mm = (p_init[-1] - p_init[0]) / ref_mm if len(p_init) > 1 else 1.0
 
-    # Dual-Analyse
     col_l, col_r = st.columns(2)
+    
     with col_l:
-        dist_l_px, ang_l, img_l, prof_l, peaks_l = get_side_analysis(img_raw, "left", kanten_sens, peak_dist)
+        dist_l_px, ang_l, img_l, prof_l, peaks_l = get_side_analysis(img_raw, "left", sens, p_dist)
         dist_l_mm = dist_l_px / px_pro_mm
-        st.metric("Abstand Links", f"{dist_l_mm:.3f} mm", f"{ang_l:.1f}°")
+        st.metric("Abstand L", f"{dist_l_mm:.3f} mm", f"{ang_l:.1f}°")
         st.image(img_l, use_container_width=True)
+        if len(peaks_l) < 2: st.error("Links: Nur 1 Kante gefunden!")
+        
         fig_l, ax_l = plt.subplots(figsize=(10, 3))
         ax_l.plot(prof_l, color='cyan')
-        ax_l.axhline(kanten_sens, color='red', linestyle='--')
+        ax_l.axhline(sens, color='red', linestyle='--')
         if len(peaks_l) >= 2:
-            ax_l.axvline(peaks_l[0], color='yellow')
-            ax_l.axvline(peaks_l[-1], color='green')
+            ax_l.axvline(peaks_l[0], color='yellow'); ax_l.axvline(peaks_l[-1], color='green')
         st.pyplot(fig_l)
 
     with col_r:
-        dist_r_px, ang_r, img_r, prof_r, peaks_r = get_side_analysis(img_raw, "right", kanten_sens, peak_dist)
+        dist_r_px, ang_r, img_r, prof_r, peaks_r = get_side_analysis(img_raw, "right", sens, p_dist)
         dist_r_mm = dist_r_px / px_pro_mm
-        st.metric("Abstand Rechts", f"{dist_r_mm:.3f} mm", f"{ang_r:.1f}°")
+        st.metric("Abstand R", f"{dist_r_mm:.3f} mm", f"{ang_r:.1f}°")
         st.image(img_r, use_container_width=True)
+        if len(peaks_r) < 2: st.error("Rechts: Nur 1 Kante gefunden!")
+        
         fig_r, ax_r = plt.subplots(figsize=(10, 3))
         ax_r.plot(prof_r, color='cyan')
-        ax_r.axhline(kanten_sens, color='red', linestyle='--')
+        ax_r.axhline(sens, color='red', linestyle='--')
         if len(peaks_r) >= 2:
-            ax_r.axvline(peaks_r[0], color='green')
-            ax_r.axvline(peaks_r[-1], color='yellow')
+            ax_r.axvline(peaks_r[0], color='green'); ax_r.axvline(peaks_r[-1], color='yellow')
         st.pyplot(fig_r)
 
-    # Sidebar Info (Hier wurde der NameError gefixt)
-    st.sidebar.markdown("---")
-    st.sidebar.caption(f"Winkel L: {ang_l:.2f}° | R: {ang_r:.2f}°")
-
-    # Ergebnis
+    # Korrektur
     st.divider()
-    diff_mm = dist_l_mm - dist_r_mm
-    korrektur_mm = diff_mm / 2.0
-    umdrehungen = round((abs(korrektur_mm) / mm_umdr) * 4) / 4
-    res_c1, res_c2 = st.columns(2)
-    with res_c1:
-        st.header("📋 Ergebnis")
-        if umdrehungen < 0.25: st.success("✅ Zentriert!")
-        else: st.error(f"Schraube {umdrehungen} Umdr. nach {'RECHTS' if korrektur_mm > 0 else 'LINKS'}")
-    with res_c2:
-        st.info(f"Differenz: {abs(diff_mm):.3f} mm\n\nPräzision: {berechne_mess_toleranz(px_pro_mm):.3f} mm")
+    diff = dist_l_mm - dist_r_mm
+    umdr = round((abs(diff/2)/mm_umdr)*4)/4
+    st.header(f"Ergebnis: {umdr} Umdrehungen nach {'RECHTS' if diff/2 > 0 else 'LINKS'}")
