@@ -93,46 +93,47 @@ if uploaded_file:
     img_raw = np.array(Image.open(uploaded_file).convert('RGB'))
     
     # Kalibrierung
-    with st.spinner("Analyse läuft..."):
-        # Dummy-Kalibrierung zur Ermittlung von px_pro_mm
+# --- KALIBRIERUNG (PX ZU MM) MIT VISUELLER KONTROLLE ---
+    with st.spinner("Kalibrierung läuft..."):
         gray_init = cv2.cvtColor(img_raw, cv2.COLOR_RGB2GRAY)
-        sample = np.mean(np.abs(np.diff(gray_init, axis=1)), axis=0)
-        p_init, _ = find_peaks(sample/np.max(sample), height=0.4, distance=100)
-        px_pro_mm = (p_init[-1] - p_init[0]) / ref_mm if len(p_init) > 1 else 1.0
-
-    col_l, col_r = st.columns(2)
-    
-    with col_l:
-        dist_l_px, ang_l, img_l, prof_l, peaks_l = get_side_analysis(img_raw, "left", sens, p_dist)
-        dist_l_mm = dist_l_px / px_pro_mm
-        st.metric("Abstand L", f"{dist_l_mm:.3f} mm", f"{ang_l:.1f}°")
-        st.image(img_l, use_container_width=True)
-        if len(peaks_l) < 2: st.error("Links: Nur 1 Kante gefunden!")
+        # Verbesserung für die Kalibrierung
+        clahe_init = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(gray_init)
+        smooth_init = cv2.bilateralFilter(clahe_init, 9, 75, 75)
         
-        fig_l, ax_l = plt.subplots(figsize=(10, 3))
-        ax_l.plot(prof_l, color='cyan')
-        ax_l.axhline(sens, color='red', linestyle='--')
-        if len(peaks_l) >= 2:
-            ax_l.axvline(peaks_l[0], color='yellow'); ax_l.axvline(peaks_l[-1], color='green')
-        st.pyplot(fig_l)
-
-    with col_r:
-        dist_r_px, ang_r, img_r, prof_r, peaks_r = get_side_analysis(img_raw, "right", sens, p_dist)
-        dist_r_mm = dist_r_px / px_pro_mm
-        st.metric("Abstand R", f"{dist_r_mm:.3f} mm", f"{ang_r:.1f}°")
-        st.image(img_r, use_container_width=True)
-        if len(peaks_r) < 2: st.error("Rechts: Nur 1 Kante gefunden!")
+        sample = np.mean(np.abs(np.diff(smooth_init.astype(np.float32), axis=1)), axis=0)
+        sample_norm = sample / (np.max(sample) if np.max(sample) > 0 else 1)
         
-        fig_r, ax_r = plt.subplots(figsize=(10, 3))
-        ax_r.plot(prof_r, color='cyan')
-        ax_r.axhline(sens, color='red', linestyle='--')
-        if len(peaks_r) >= 2:
-            ax_r.axvline(peaks_r[0], color='green'); ax_r.axvline(peaks_r[-1], color='yellow')
-        st.pyplot(fig_r)
+        # Suche die inneren Referenz-Kanten
+        p_init, _ = find_peaks(sample_norm, height=0.4, distance=100)
+        
+        if len(p_init) >= 2:
+            # Berechnung des Maßstabs
+            pixel_abstand = p_init[-1] - p_init[0]
+            px_pro_mm = pixel_abstand / ref_mm
+            
+            # --- VISUALISIERUNG DER KALIBRIERUNG ---
+            st.subheader("📏 Kalibrierungs-Check (Referenz-Abstand)")
+            img_calib = img_raw.copy()
+            h_c, w_c = img_calib.shape[:2]
+            
+            # Zeichne zwei dicke blaue Linien auf die erkannten Referenz-Punkte
+            cv2.line(img_calib, (int(p_init[0]), 0), (int(p_init[0]), h_c), (255, 0, 0), 12) 
+            cv2.line(img_calib, (int(p_init[-1]), 0), (int(p_init[-1]), h_c), (255, 0, 0), 12) 
+            
+            # Bild anzeigen
+            st.image(img_calib, 
+                     caption=f"Kalibrierung: {pixel_abstand} Pixel entsprechen {ref_mm} mm (Blau markiert)", 
+                     use_container_width=True)
+            
+            st.info(f"Maßstab: **{px_pro_mm:.2f} px/mm**")
+        else:
+            px_pro_mm = 1.0
+            st.error("❌ Kalibrierung fehlgeschlagen: Konnte keine zwei Referenz-Kanten finden!")
 
     # Korrektur
     st.divider()
     diff = dist_l_mm - dist_r_mm
     umdr = round((abs(diff/2)/mm_umdr)*4)/4
     st.header(f"Ergebnis: {umdr} Umdrehungen nach {'RECHTS' if diff/2 > 0 else 'LINKS'}")
+
 
